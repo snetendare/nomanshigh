@@ -124,7 +124,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     Killing a player loots product off them and counts 3 toward your streak<br>
     <b>G</b> chemtrail strike &middot; <b>N</b> tactical nuke &middot; <b>M</b> music &middot; <b>L</b> copy invite link &middot; <b>[ ]</b> mouse sensitivity<br>
     <b>HIGH METER:</b> every point is +1% damage. Stack substances for cocktail bonuses. Go over 100% and you green out.<br>
-    <b>WIN:</b> everyone has a stash and two towers. Your fiends march at both rivals. Drop a tower to expose a stash, destroy the stash to knock that player out (they get one last life). Last stash standing wins. Sudden death at 10:00.<br>
+    <b>WIN:</b> everyone has a stash and two towers. Your fiends march at both rivals. Drop a tower to expose a stash. Destroying a stash does not knock that player out: they stop respawning and are on their last life (and show on everyone's map), so you still have to kill them. Last one alive wins. Sudden death at 10:00.<br>
     <b>RANGE:</b> you only damage a tower or stash from inside its ring on the ground. Towers shoot players from further out than that, so bring your fiends to tank.<br>
     <b>THE LAB:</b> hold the middle circle alone to cook a batch: free supply and giant fiends sent at both rivals. Kill the pink elephant there and it fights for you.<br>
     Fewer than 3 players? Empty colours are run by bots. Camps, care packages and narcs all drop product. Desktop + mouse only.
@@ -412,7 +412,7 @@ function joinPeer(code) {
 // ============================== HOST SIM
 function hostReset() {
   const players = S ? S.players : {}, teamOf = S ? S.teamOf : { host: 0 };
-  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 40, careT: 35, bossT: 200, boss: 0, necT: 90, sudden: false, lab: { p: 0, cd: 0, sp: 0, tm: -1 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, st: [] };
+  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 40, careT: 35, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: [true, true, true], lab: { p: 0, cd: 0, sp: 0, tm: -1 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, st: [] };
   for (const [t, team, x, z] of STRUCTS) S.st.push(spawn(t, team, x, z));
   S.camps.forEach((c, i) => spawnCamp(i));
 }
@@ -423,6 +423,7 @@ function spawn(t, team, x, z, o = {}) {
 function spawnCamp(i) { const c = S.camps[i]; c.alive = 3; for (let k = 0; k < 3; k++) spawn('spd', NEU, c.x + rnd(-3, 3), c.z + rnd(-3, 3), { camp: i, hx: c.x, hz: c.z, leash: 17, hpk: 1.4 }); }
 const coreOf = t => S.st[t * 3];
 function aliveEnemies(t) { return [0, 1, 2].filter(j => j !== t && coreOf(j).hp > 0); }
+function teamAlive(t) { if (coreOf(t).hp > 0) return true; for (const id in S.players) if ((S.teamOf[id] ?? 0) === t && S.players[id].st !== 5) return true; return false; }
 function spawnLane(team, goal, t, o = {}) { const b = BASES[team], g = BASES[goal], dx = g.x - b.x, dz = g.z - b.z, l = hyp(dx, dz); return spawn(t, team, b.x + dx / l * 12 + rnd(-3, 3), b.z + dz / l * 12 + rnd(-3, 3), { goal, ox: rnd(-4, 4), ...o }); }
 function spawnHunter(x, z, k) { const a = rnd(6.28), o = { x: x + Math.sin(a) * 30, z: z + Math.cos(a) * 30 }; pushOut(o, 1.5); spawn('spd', NEU, o.x, o.z, { hunt: 1, hpk: k }); }
 function dropPick(x, z, k) { const o = { x: x + rnd(-1.5, 1.5), z: z + rnd(-1.5, 1.5) }; pushOut(o, 1); const p = { id: S.nid++, k: k ?? Math.floor(Math.random() * DRUGS.length), x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); if (S.picks.size > 40) S.picks.delete(S.picks.keys().next().value); }
@@ -442,8 +443,6 @@ function onEntDeath(e) {
   else if (e.t === 'co') {
     emit({ t: 'elim', team: e.team, by: e.last || '' });
     for (const o of S.ents.values()) if (o.team === e.team && o !== e) { o.hp = 0; o.last = null; }
-    const alive = [0, 1, 2].filter(t => coreOf(t).hp > 0);
-    if (alive.length <= 1) { S.over = 1; emit({ t: 'over', team: alive.length ? alive[0] : -1 }); }
   }
   else if (e.camp >= 0) { const c = S.camps[e.camp]; if (--c.alive <= 0) { dropPick(c.x, c.z); dropPick(c.x, c.z); c.resp = 45; } }
   else if (Math.random() < (e.team === NEU ? 0.3 : 0.18)) dropPick(e.x, e.z);
@@ -509,6 +508,11 @@ function hostTick(dt) {
   }
   for (let i = 0; i < arr.length; i++) { const a = arr[i]; if (ET[a.t].struct || a.hp <= 0) continue; for (let j = i + 1; j < arr.length; j++) { const b = arr[j]; if (ET[b.t].struct || b.hp <= 0) continue; const dx = b.x - a.x, dz = b.z - a.z, d = hyp(dx, dz), m = (ET[a.t].r + ET[b.t].r) * 0.85; if (d < m && d > 1e-3) { const k = (m - d) / d * 0.5; a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k; } } }
   for (const e of arr) if (e.hp <= 0 && S.ents.has(e.id)) { S.ents.delete(e.id); onEntDeath(e); }
+  if (S.started && !S.over) {
+    const alive = [0, 1, 2].filter(teamAlive);
+    for (let t = 0; t < 3; t++) if (S.wasAlive[t] && !alive.includes(t)) { S.wasAlive[t] = false; if (alive.length > 1) emit({ t: 'out', team: t }); }
+    if (alive.length <= 1) { S.over = 1; emit({ t: 'over', team: alive.length ? alive[0] : -1 }); }
+  }
 }
 function makeSnap() {
   const e = []; for (const x of S.ents.values()) e.push([x.id, x.t, x.team, +x.x.toFixed(1), +x.z.toFixed(1), +x.yaw.toFixed(2), Math.ceil(x.hp), Math.ceil(x.mhp), x.st, (x.inv ? 1 : 0) | (x.big ? 2 : 0) | (x.hunt ? 4 : 0)]);
@@ -624,7 +628,8 @@ function onEvent(ev) {
     case 'kill': onKill(ev); break;
     case 'pkill': onPKill(ev); break;
     case 'elim': feed('<span style="color:' + TEAMS[ev.team].c + '">' + TEAMS[ev.team].n + ' STASH</span> got busted' + (ev.by ? ' by ' + tagOf(ev.by) : ''));
-      if (ev.team === me.team) { banner('YOUR STASH GOT BUSTED', 'last life. no more respawns.', false, '#ff3b3b'); SFX.boom(); } else banner(TEAMS[ev.team].n + ' ELIMINATED', ev.by ? 'busted by ' + nameOf(ev.by) : 'it burned down', true, TEAMS[ev.team].c); break;
+      if (ev.team === me.team) { banner('YOUR STASH GOT BUSTED', 'last life, no more respawns. you can still win this.', false, '#ff3b3b'); SFX.boom(); } else banner(TEAMS[ev.team].n + ' STASH BUSTED', 'they are on their last life and show on your map. finish them.', true, TEAMS[ev.team].c); break;
+    case 'out': feed('<span style="color:' + TEAMS[ev.team].c + '">' + TEAMS[ev.team].n + '</span> is out of the game'); banner(TEAMS[ev.team].n + ' IS OUT', ev.team === me.team ? 'gg go next' : 'one less to worry about', true, TEAMS[ev.team].c); break;
     case 'got': if (ev.to === me.id) gotPick(ev.k); break;
     case 'fx': if (ev.by !== me.id) { fxBoom(ev.x, 1, ev.z, ev.r, ev.c, ev.l || 0.5); SFX.expl(); } break;
     case 'ann': banner(ev.m, ev.s || '', !!ev.horn, ev.c || '#ffe600'); break;
@@ -632,7 +637,7 @@ function onEvent(ev) {
     case 'feed': feed(ev.m); break;
     case 'batch': if (ev.team === me.team) { const a = []; for (let i = 0; i < 3; i++) { const k = Math.floor(Math.random() * 5); me.inv[k]++; a.push(DRUGS[k].name); } banner('BATCH COMPLETE', 'giant fiends sent at your enemies &middot; you got ' + a.join(' + '), true, '#ffe600'); playClip('evolve'); } else banner(TEAMS[ev.team].n + ' COOKED A BATCH', 'giant fiends are coming for your stash', false, TEAMS[ev.team].c); break;
     case 'nuke': $('white').style.opacity = 1; setTimeout(() => $('white').style.transition = 'opacity 2s', 30); setTimeout(() => { $('white').style.opacity = 0; }, 60); setTimeout(() => $('white').style.transition = '', 2200); banner('TACTICAL NUKE', nameOf(ev.by) + ' said gg', true, '#fff'); SFX.boom(); if (ev.team !== me.team) takeDamage(150, '', ev.by); break;
-    case 'start': banner('1v1v1: BUST THEIR STASH', 'last stash standing wins. do not get sober.', true); playClip('battle-start'); if (musicOn) bgm.play().catch(() => {}); break;
+    case 'start': banner('1v1v1: BUST THEIR STASH', 'then finish them off. last one alive wins.', true); playClip('battle-start'); if (musicOn) bgm.play().catch(() => {}); break;
     case 'over': { const win = ev.team === me.team, e = $('end'); e.style.display = 'flex'; $('endT').textContent = win ? 'GG EZ' : ev.team < 0 ? 'EVERYBODY LOST' : 'BUSTED'; $('endT').style.color = win ? '#ffe600' : '#ff3b3b';
       const names = Object.values(others).filter(p => p.tm === ev.team).map(p => p.n).join(', ') || 'the bots (embarrassing)';
       $('endS').textContent = (ev.team < 0 ? 'Every stash burned down. ' : TEAMS[ev.team].n + ' wins: ' + names + '. ') + 'You: ' + me.pk + ' player kills, ' + me.kills + ' creeps, ' + me.deaths + ' deaths, level ' + me.lvl; $('endH').textContent = isHost ? 'press ENTER for a rematch' : 'waiting for the host to run it back'; win ? SFX.horn() : SFX.boom(); document.exitPointerLock && document.exitPointerLock(); break; }
@@ -898,7 +903,7 @@ function updateHud(time) {
   $('streak').innerHTML = me.streak >= 3 ? '🔥 ' + me.streak + ' STREAK' : '';
   const t = Math.floor(G.t), cores = [0, 0, 0]; for (const v of views.values()) if (v.t === 'co') cores[v.team] = v.hp / v.mhp;
   let top = '<b id="clock" style="font-size:22px;min-width:70px;text-align:center;color:' + (G.sd ? '#ff3b3b' : '#fff') + '">' + (G.st ? Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') : 'WARMUP') + '</b>';
-  for (let tm = 0; tm < 3; tm++) { const names = Object.values(others).filter(p => p.tm === tm).map(p => p.n).join(', ') || 'BOTS'; top += `<div class="tm" style="${tm === me.team ? 'outline:2px solid #fff;' : ''}${cores[tm] <= 0 ? 'opacity:.35;' : ''}"><span style="color:${TEAMS[tm].c}">${names}</span><div class="cbar"><i style="background:${TEAMS[tm].c};width:${cores[tm] * 100}%"></i></div></div>`; }
+  for (let tm = 0; tm < 3; tm++) { const ps = Object.values(others).filter(p => p.tm === tm), names = ps.map(p => p.n).join(', ') || 'BOTS', dead = cores[tm] <= 0, last = dead && ps.some(p => p.st !== 5); top += `<div class="tm" style="${tm === me.team ? 'outline:2px solid #fff;' : ''}${dead && !last ? 'opacity:.35;' : ''}"><span style="color:${TEAMS[tm].c}">${names}${last ? ' · LAST LIFE' : dead ? ' · OUT' : ''}</span><div class="cbar"><i style="background:${TEAMS[tm].c};width:${cores[tm] * 100}%"></i></div></div>`; }
   $('top').innerHTML = top;
   $('labbar').innerHTML = !G.st ? (isHost ? 'WARMUP &middot; <b style="color:#fff">ENTER</b> starts the match (' + Object.keys(others).length + ' in lobby)' : 'WARMUP &middot; waiting for the host to start') + ' &middot; <b style="color:#fff">C</b> changes character' : G.lc > 0 ? 'THE LAB: restocking ' + Math.ceil(G.lc) + 's' : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> is cooking ' + Math.floor(G.lp) + '%' + (G.lt !== me.team ? ' &middot; go ruin it' : '') : 'THE LAB (middle): hold the circle alone to cook a batch';
   let th = ''; for (const id in others) { const p = others[id]; th += '<div class="panel" style="border-left:4px solid ' + TEAMS[p.tm].c + '">' + (id === me.id ? '▶ ' : '') + p.n + ' <span style="color:#aaa">' + HEROES[p.h].name + ' L' + p.l + '</span> ' + (p.st === 5 ? '<span style="color:#ff3b3b">OUT</span>' : p.st === 3 ? '<span style="color:#ff3b3b">DEAD</span>' : Math.max(0, p.hp) + 'hp') + ' <span style="color:#ff4fd8">' + p.hi + '%</span> <span style="color:#ffe600">' + (p.pk || 0) + 'PK</span></div>'; } $('team').innerHTML = th;
@@ -913,7 +918,7 @@ function updateHud(time) {
   for (const v of views.values()) { mctx.fillStyle = TEAMS[v.team].c; const s = v.struct ? (v.t === 'co' ? 10 : 6) : v.t === 'mam' ? 6 : 3; mctx.fillRect(mx(v.x, v.z) - s / 2, mz(v.x, v.z) - s / 2, s, s); }
   for (const p of pickViews.values()) { mctx.fillStyle = p.k === 9 ? '#19e3ff' : DRUGS[p.k].col; mctx.beginPath(); mctx.arc(mx(p.x, p.z), mz(p.x, p.z), p.k === 9 ? 4 : 2, 0, 7); mctx.fill(); }
   const shroom = fxOn('shroom');
-  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 5 || st === 3) continue; if (pv.tm !== me.team && st !== 2 && !shroom && (pv.s.sc || 1) < 1.5) continue; mctx.fillStyle = TEAMS[pv.tm].c; mctx.strokeStyle = '#fff'; mctx.beginPath(); mctx.arc(mx(pv.x, pv.z), mz(pv.x, pv.z), 5, 0, 7); mctx.fill(); mctx.stroke(); }
+  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 5 || st === 3) continue; if (pv.tm !== me.team && st !== 2 && !shroom && (pv.s.sc || 1) < 1.5 && cores[pv.tm] > 0) continue; mctx.fillStyle = TEAMS[pv.tm].c; mctx.strokeStyle = '#fff'; mctx.beginPath(); mctx.arc(mx(pv.x, pv.z), mz(pv.x, pv.z), 5, 0, 7); mctx.fill(); mctx.stroke(); }
   mctx.save(); mctx.translate(mx(me.x, me.z), mz(me.x, me.z)); mctx.rotate(-(me.yaw + dl)); mctx.fillStyle = '#fff'; mctx.beginPath(); mctx.moveTo(0, -7); mctx.lineTo(5, 5); mctx.lineTo(-5, 5); mctx.fill(); mctx.restore();
 }
 
