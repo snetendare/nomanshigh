@@ -120,6 +120,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>WASD</b> move &middot; <b>SHIFT</b> sprint &middot; <b>SPACE</b> jump<br>
     <b>LMB</b> shoot &middot; <b>RMB</b> aim &middot; <b>R</b> reload<br>
     <b>1-5</b> take a substance &middot; <b>Q</b> hero ability<br>
+    <b>C</b> change character (in warmup, before the host starts)<br>
     Killing a player loots product off them and counts 3 toward your streak<br>
     <b>G</b> chemtrail strike &middot; <b>N</b> tactical nuke &middot; <b>M</b> music &middot; <b>L</b> copy invite link &middot; <b>[ ]</b> mouse sensitivity<br>
     <b>HIGH METER:</b> every point is +1% damage. Stack substances for cocktail bonuses. Go over 100% and you green out.<br>
@@ -680,6 +681,15 @@ function resetMe() {
   $('center').style.display = 'none';
   if (me.inst) { if (me.ring) me.inst.g.remove(me.ring); me.ring = teamRing(me.inst, me.team); }
 }
+function setHero(i) {
+  if (G.st || G.ov || !me.ready || (isHost && S && S.started)) { toast('characters are locked once the match starts', 1.5); return; }
+  const keep = { x: me.x, z: me.z, yaw: me.yaw, face: me.face, pitch: me.pitch };
+  me.hero = ((i % HEROES.length) + HEROES.length) % HEROES.length;
+  me.inst.mixer.stopAllAction(); scene.remove(me.inst.g); me.ring = null;
+  me.inst = makeInst(HEROES[me.hero].model); scene.add(me.inst.g);
+  resetMe(); Object.assign(me, keep);
+  const H = HEROES[me.hero]; banner(H.name, H.hp + ' HP &middot; ' + H.gun.name + ' &middot; Q: ' + H.q.name, false, '#ffe600');
+}
 function myCoreAlive() { for (const v of views.values()) if (v.t === 'co' && v.team === me.team && v.hp > 0) return true; return false; }
 function takeDrug(k) {
   if (me.down > 0 || me.elim || me.inv[k] <= 0 || G.ov) return; me.inv[k]--; SFX.take(); const D = DRUGS[k];
@@ -887,8 +897,8 @@ function updateHud(time) {
   let top = '<b id="clock" style="font-size:22px;min-width:70px;text-align:center;color:' + (G.sd ? '#ff3b3b' : '#fff') + '">' + (G.st ? Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') : 'WARMUP') + '</b>';
   for (let tm = 0; tm < 3; tm++) { const names = Object.values(others).filter(p => p.tm === tm).map(p => p.n).join(', ') || 'BOTS'; top += `<div class="tm" style="${tm === me.team ? 'outline:2px solid #fff;' : ''}${cores[tm] <= 0 ? 'opacity:.35;' : ''}"><span style="color:${TEAMS[tm].c}">${names}</span><div class="cbar"><i style="background:${TEAMS[tm].c};width:${cores[tm] * 100}%"></i></div></div>`; }
   $('top').innerHTML = top;
-  $('labbar').innerHTML = !G.st ? (isHost ? 'WARMUP &middot; <b style="color:#fff">press ENTER to start the match</b> (' + Object.keys(others).length + ' in lobby)' : 'WARMUP &middot; waiting for the host to start') : G.lc > 0 ? 'THE LAB: restocking ' + Math.ceil(G.lc) + 's' : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> is cooking ' + Math.floor(G.lp) + '%' + (G.lt !== me.team ? ' &middot; go ruin it' : '') : 'THE LAB (middle): hold the circle alone to cook a batch';
-  let th = ''; for (const id in others) { const p = others[id]; th += '<div class="panel" style="border-left:4px solid ' + TEAMS[p.tm].c + '">' + (id === me.id ? '▶ ' : '') + p.n + ' <span style="color:#aaa">L' + p.l + '</span> ' + (p.st === 5 ? '<span style="color:#ff3b3b">OUT</span>' : p.st === 3 ? '<span style="color:#ff3b3b">DEAD</span>' : Math.max(0, p.hp) + 'hp') + ' <span style="color:#ff4fd8">' + p.hi + '%</span> <span style="color:#ffe600">' + (p.pk || 0) + 'PK</span></div>'; } $('team').innerHTML = th;
+  $('labbar').innerHTML = !G.st ? (isHost ? 'WARMUP &middot; <b style="color:#fff">ENTER</b> starts the match (' + Object.keys(others).length + ' in lobby)' : 'WARMUP &middot; waiting for the host to start') + ' &middot; <b style="color:#fff">C</b> changes character' : G.lc > 0 ? 'THE LAB: restocking ' + Math.ceil(G.lc) + 's' : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> is cooking ' + Math.floor(G.lp) + '%' + (G.lt !== me.team ? ' &middot; go ruin it' : '') : 'THE LAB (middle): hold the circle alone to cook a batch';
+  let th = ''; for (const id in others) { const p = others[id]; th += '<div class="panel" style="border-left:4px solid ' + TEAMS[p.tm].c + '">' + (id === me.id ? '▶ ' : '') + p.n + ' <span style="color:#aaa">' + HEROES[p.h].name + ' L' + p.l + '</span> ' + (p.st === 5 ? '<span style="color:#ff3b3b">OUT</span>' : p.st === 3 ? '<span style="color:#ff3b3b">DEAD</span>' : Math.max(0, p.hp) + 'hp') + ' <span style="color:#ff4fd8">' + p.hi + '%</span> <span style="color:#ffe600">' + (p.pk || 0) + 'PK</span></div>'; } $('team').innerHTML = th;
   if (toastT > 0) { toastT -= 0.1; if (toastT <= 0) $('toast').textContent = ''; }
   if (me.safeT > 0 && G.st) toast('spawn shield ' + me.safeT.toFixed(0) + 's', 0.3);
   $('lockmsg').style.display = (!locked && !AUTO && !G.ov) ? 'block' : 'none';
@@ -918,6 +928,7 @@ addEventListener('keydown', e => {
   if (!running || e.repeat) return; keys[e.code] = true;
   if (e.code.startsWith('Digit')) { const k = +e.code[5] - 1; if (k >= 0 && k < 5) takeDrug(k); }
   if (e.code === 'BracketLeft' || e.code === 'BracketRight') { sens = clamp(sens * (e.code === 'BracketLeft' ? 0.9 : 1.1), 0.2, 4); try { localStorage.setItem('nmh_sens', sens.toFixed(2)); } catch (x) {} toast('mouse sensitivity ' + Math.round(sens * 100) + '%', 1.2); }
+  if (e.code === 'KeyC') setHero(me.hero + 1);
   if (e.code === 'KeyR') reload(); if (e.code === 'KeyQ') ability(); if (e.code === 'KeyG') strike(); if (e.code === 'KeyN') nuke();
   if (e.code === 'KeyM') { musicOn = !musicOn; musicOn && G.st ? bgm.play().catch(() => {}) : bgm.pause(); toast('music ' + (musicOn ? 'on' : 'off')); }
   if (e.code === 'Enter' && isHost) { if (S.over) { hostReset(); emit({ t: 'reset' }); } else if (!S.started) startMatch(); }
@@ -958,7 +969,7 @@ function start(asHost) {
   else joinPeer(code);
   running = true; last = performance.now(); requestAnimationFrame(frame);
   if (!AUTO) lockPtr();
-  window.DBG = { me, views, pviews, keys, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
+  window.DBG = { me, views, pviews, keys, setHero, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
     step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { const time = performance.now() / 1000 + i * dt; updateMe(dt, time); updateViews(dt, time); updateFx(dt); updateCam(dt, time); } renderer.render(scene, camera); }, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
 }
 $('bHost').onclick = () => start(true); $('bJoin').onclick = () => start(false);
