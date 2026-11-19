@@ -125,7 +125,8 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>G</b> chemtrail strike &middot; <b>N</b> tactical nuke &middot; <b>M</b> music &middot; <b>L</b> copy invite link &middot; <b>[ ]</b> mouse sensitivity<br>
     <b>HIGH METER:</b> every point is +1% damage. Stack substances for cocktail bonuses. Go over 100% and you green out.<br>
     <b>WIN:</b> everyone has a stash and two towers. Your fiends march at both rivals. Drop a tower to expose a stash. Destroying a stash does not knock that player out: they stop respawning and are on their last life (and show on everyone's map), so you still have to kill them. Last one alive wins. Sudden death at 10:00.<br>
-    <b>RANGE:</b> you only damage a tower or stash from inside its ring on the ground. Towers shoot players from further out than that, so bring your fiends to tank.<br>
+    <b>RANGE:</b> you only damage a tower or stash from inside its ring on the ground. Towers shoot players anywhere inside that same ring, so bring your fiends to tank.<br>
+    <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 20 seconds every 4 minutes (and all through warmup, to try them).<br>
     <b>THE LAB:</b> hold the middle circle alone to cook a batch: free supply and giant fiends sent at both rivals. Kill the pink elephant there and it fights for you.<br>
     Fewer than 3 players? Empty colours are run by bots. Camps, care packages and narcs all drop product. Desktop + mouse only.
   </div>
@@ -146,7 +147,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 10;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 11;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -174,7 +175,7 @@ const ET = {
   tw: { h: 11, r: 3.6, hp: 1300, dmg: 22, rng: 26, acd: 0.9, xp: 150, struct: 1, ranged: 1, nm: 'TOWER' },
   co: { h: 9, r: 6, hp: 2600, xp: 300, struct: 1, nm: 'STASH' },
 };
-const NEU = 3, PVP = 0.6, SR = 34, TWP = 42;
+const NEU = 3, PVP = 0.6, SR = 34, TWP = SR;
 const HUE = { gob: [0.33, -0.25, 0, 0], arc: [0, 0.4, -0.3, 0], spd: [0, 0, 0, 0], nec: [0, 0, 0, 0], mam: [0, 0.4, -0.3, 0.85] };
 const TEAMS = [{ n: 'BLUE', c: '#3fa7ff', h: 0x3fa7ff }, { n: 'RED', c: '#ff4d4d', h: 0xff4d4d }, { n: 'GREEN', c: '#57e06a', h: 0x57e06a }, { n: 'NARCS', c: '#c9a0ff', h: 0xc9a0ff }];
 const ARENA = 108, BR = 84;
@@ -186,6 +187,20 @@ for (let i = 0; i < 3; i++) {
   STRUCTS.push(['co', i, BASES[i].x, BASES[i].z]);
   for (let j = 0; j < 3; j++) if (j !== i) { const dx = BASES[j].x - BASES[i].x, dz = BASES[j].z - BASES[i].z, l = hyp(dx, dz); STRUCTS.push(['tw', i, BASES[i].x + dx / l * 30 - dz / l * 7, BASES[i].z + dz / l * 30 + dx / l * 7]); }
 }
+// movement toys: on in warmup, then for 20 s every 4 minutes. k: 0 launch ramp (along dx,dz), 1 bounce pad, 2 speed gate
+const PADS = [];
+{ for (let i = 0; i < 3; i++) {
+    const b = BASES[i], l = hyp(b.x, b.z), cx = -b.x / l, cz = -b.z / l;
+    PADS.push({ k: 0, x: b.x + cx * 27, z: b.z + cz * 27, dx: cx, dz: cz });      // out of each base, toward the lab
+    PADS.push({ k: 2, x: b.x + cx * 46, z: b.z + cz * 46, dx: cx, dz: cz });
+    const c = BASES[(i + 1) % 3], ll = hyp(c.x - b.x, c.z - b.z), ux = (c.x - b.x) / ll, uz = (c.z - b.z) / ll;
+    PADS.push({ k: 0, x: b.x + ux * ll * 0.36, z: b.z + uz * ll * 0.36, dx: ux, dz: uz });      // on each lane, one from either side
+    PADS.push({ k: 0, x: b.x + ux * ll * 0.64, z: b.z + uz * ll * 0.64, dx: -ux, dz: -uz });
+    PADS.push({ k: 2, x: b.x + ux * ll * 0.5 - uz * 5, z: b.z + uz * ll * 0.5 + ux * 5, dx: ux, dz: uz });
+    PADS.push({ k: 1, x: CAMPS[i].x * 0.82, z: CAMPS[i].z * 0.82, dx: 0, dz: 0 });
+  }
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.5; PADS.push({ k: 1, x: Math.sin(a) * 23, z: Math.cos(a) * 23, dx: 0, dz: 0 }); }
+}
 function segDist(px, pz, a, b) { const dx = b.x - a.x, dz = b.z - a.z, t = clamp(((px - a.x) * dx + (pz - a.z) * dz) / (dx * dx + dz * dz), 0, 1); return hyp(px - a.x - dx * t, pz - a.z - dz * t); }
 const OBST = [];
 { const r = mulberry(420);
@@ -193,12 +208,12 @@ const OBST = [];
     const a = r() * Math.PI * 2, d = Math.sqrt(r()) * 100, x = Math.sin(a) * d, z = Math.cos(a) * d, rad = 1.3 + r() * 2.2, h = 3 + r() * 5, k = Math.floor(r() * 3);
     if (d < 17 || BASES.some(b => hyp(b.x - x, b.z - z) < 24) || CAMPS.some(c => hyp(c.x - x, c.z - z) < 9)) continue;
     if (segDist(x, z, BASES[0], BASES[1]) < 12 || segDist(x, z, BASES[1], BASES[2]) < 12 || segDist(x, z, BASES[2], BASES[0]) < 12) continue;
-    if (OBST.some(o => hyp(o.x - x, o.z - z) < o.r + rad + 3.5)) continue;
+    if (PADS.some(p => hyp(p.x - x, p.z - z) < rad + 5) || OBST.some(o => hyp(o.x - x, o.z - z) < o.r + rad + 3.5)) continue;
     OBST.push({ x, z, r: rad, h, k });
   } }
 function pushOut(o, r, structs) {
-  for (const b of OBST) { const dx = o.x - b.x, dz = o.z - b.z, d = hyp(dx, dz), m = r + b.r; if (d < m && d > 1e-4) { o.x = b.x + dx / d * m; o.z = b.z + dz / d * m; } }
-  if (structs) for (const b of structs) { const dx = o.x - b.x, dz = o.z - b.z, d = hyp(dx, dz), m = r + b.r; if (d < m && d > 1e-4) { o.x = b.x + dx / d * m; o.z = b.z + dz / d * m; } }
+  for (const b of OBST) { if (o.y > b.h) continue; const dx = o.x - b.x, dz = o.z - b.z, d = hyp(dx, dz), m = r + b.r; if (d < m && d > 1e-4) { o.x = b.x + dx / d * m; o.z = b.z + dz / d * m; } }
+  if (structs) for (const b of structs) { if (o.y > b.h) continue; const dx = o.x - b.x, dz = o.z - b.z, d = hyp(dx, dz), m = r + b.r; if (d < m && d > 1e-4) { o.x = b.x + dx / d * m; o.z = b.z + dz / d * m; } }
   const d = hyp(o.x, o.z), m = ARENA - r; if (d > m) { o.x *= m / d; o.z *= m / d; }
 }
 
@@ -345,7 +360,27 @@ function buildWorld() {
   const lbl = textSprite('THE LAB', '#ffe600', 8); lbl.position.set(LAB.x, 7.5, LAB.z); scene.add(lbl);
   labWisp = makeInst('wisp', 0, 1.6); labWisp.g.position.set(LAB.x, 2.2, LAB.z); scene.add(labWisp.g); deco.push(labWisp);
   BASES.forEach((b, i) => { const p = makeInst('sunpriest', [0, 0.9, 0.2][i]); p.g.position.set(b.x * 1.11, 0, b.z * 1.11); p.g.rotation.y = Math.atan2(-b.x, -b.z); scene.add(p.g); deco.push(p); });
+  buildPads();
   CAMPS.forEach(cp => { const mm = new THREE.Mesh(new THREE.RingGeometry(5.5, 6, 6), new THREE.MeshBasicMaterial({ color: 0x220000, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })); mm.rotation.x = -Math.PI / 2; mm.position.set(cp.x, 0.05, cp.z); scene.add(mm); });
+}
+
+const PADCOL = [0xff8a1e, 0xff4fd8, 0x19e3ff], padViews = [];
+function buildPads() {
+  for (const p of PADS) {
+    const g = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.3, side: THREE.DoubleSide }), ex = []; g.position.set(p.x, 0, p.z);
+    if (p.k === 0) {
+      g.rotation.y = Math.atan2(p.dx, p.dz);
+      const w = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.35, 6.2), mat); w.rotation.x = -0.32; w.position.y = 1.02; g.add(w);
+      for (let i = 0; i < 3; i++) { const st = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.1, 0.5), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })); st.rotation.x = -0.32; st.position.set(0, 0.75 + i * 0.52, -1.6 + i * 1.6); g.add(st); ex.push(st); }
+    } else if (p.k === 1) {
+      const c = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.7, 0.5, 20), mat); c.position.y = 0.25; g.add(c);
+      const r = new THREE.Mesh(new THREE.TorusGeometry(2.4, 0.18, 6, 24), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })); r.rotation.x = Math.PI / 2; r.position.y = 0.55; g.add(r); ex.push(r);
+    } else {
+      g.rotation.y = Math.atan2(p.dx, p.dz);
+      const t = new THREE.Mesh(new THREE.TorusGeometry(3.4, 0.34, 8, 28), mat); t.position.y = 3.5; g.add(t);
+    }
+    scene.add(g); padViews.push({ p, g, mat, ex });
+  }
 }
 
 // ============================== fx
@@ -374,11 +409,12 @@ const PFX = 'nomanshigh420-';
 let isHost = false, peer = null, hostConn = null, roomCode = '';
 const conns = new Map();
 let S = null;                        // host sim state
-let G = { t: 0, st: 0, ov: 0, lp: 0, lc: 0, lt: -1, sd: 0 }; let others = {};
+let G = { t: 0, st: 0, ov: 0, lp: 0, lc: 0, lt: -1, sd: 0, rm: 0, rn: 240 }; let others = {};
+const padsOn = () => !G.st || G.rm > 0;   // the movement toys: always on in warmup
 const views = new Map(), pickViews = new Map(), pviews = new Map();
 const me = { id: 'host', team: 0, ready: false, name: 'PLAYER', hero: 0, x: 0, y: 0, z: -74, vy: 0, yaw: 0, pitch: 0, face: 0, hp: 100, mhp: 100, shield: 0, ammo: 0, reloadT: 0, fireT: 0, shotT: 0, qT: 0, dashT: 0, dashX: 0, dashZ: 0,
   down: 0, downKind: '', willElim: false, elim: false, safeT: 0, lastBy: '', lastByT: 0, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, inv: [1, 1, 1, 1, 0], fx: [0, 0, 0, 0, 0], fxMax: [1, 1, 1, 1, 1], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0,
-  strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0 };
+  strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0, kx: 0, kz: 0, padT: 0, boostT: 0 };
 const keys = {}; let firing = false, locked = false;
 const fxOn = id => me.fx[DI[id]] > 0;
 function hostBroadcast(m) { for (const c of conns.values()) if (c.open) try { c.send(m); } catch (e) {} }
@@ -413,7 +449,7 @@ function joinPeer(code) {
 // ============================== HOST SIM
 function hostReset() {
   const players = S ? S.players : {}, teamOf = S ? S.teamOf : { host: 0 };
-  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 40, careT: 35, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: [true, true, true], lab: { p: 0, cd: 0, sp: 0, tm: -1 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, st: [] };
+  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 40, careT: 35, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: [true, true, true], rampT: 240, rampOn: 0, lab: { p: 0, cd: 0, sp: 0, tm: -1 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, st: [] };
   for (const [t, team, x, z] of STRUCTS) S.st.push(spawn(t, team, x, z));
   S.camps.forEach((c, i) => spawnCamp(i));
 }
@@ -467,6 +503,8 @@ function hostTick(dt) {
     if ((S.careT -= dt) <= 0) { S.careT = 55; const a = rnd(6.28), d = rnd(12, 36), o = { x: Math.sin(a) * d, z: Math.cos(a) * d }; pushOut(o, 2); const p = { id: S.nid++, k: 9, x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); emit({ t: 'ann', m: 'CARE PACKAGE INBOUND', s: 'near the middle. first come first served.', c: '#19e3ff' }); }
     if (!S.sudden && S.time > 600) { S.sudden = true; emit({ t: 'ann', m: 'SUDDEN DEATH', s: 'every stash is on fire. last one standing wins.', c: '#ff3b3b', horn: 1 }); }
     if (S.sudden) for (let t = 0; t < 3; t++) { const c = coreOf(t); if (c.hp > 0) c.hp -= 25 * dt; }
+    if (S.rampOn > 0) { if ((S.rampOn -= dt) <= 0) { S.rampOn = 0; emit({ t: 'toast', m: 'ramps offline. back in 4 minutes.' }); } }
+    else if ((S.rampT -= dt) <= 0) { S.rampT = 220; S.rampOn = 20; emit({ t: 'ann', m: 'RAMPS ONLINE', s: '20 seconds of launch ramps, bounce pads and speed gates. send it.', c: '#ff8a1e', horn: 1 }); }
     // the lab: only one colour in the circle cooks
     const L = S.lab;
     if (L.cd > 0) L.cd -= dt; else {
@@ -518,7 +556,7 @@ function hostTick(dt) {
 function makeSnap() {
   const e = []; for (const x of S.ents.values()) e.push([x.id, x.t, x.team, +x.x.toFixed(1), +x.z.toFixed(1), +x.yaw.toFixed(2), Math.ceil(x.hp), Math.ceil(x.mhp), x.st, (x.inv ? 1 : 0) | (x.big ? 2 : 0) | (x.hunt ? 4 : 0)]);
   const pk = []; for (const p of S.picks.values()) pk.push([p.id, p.k, p.x, p.z]);
-  return { t: 's', g: { t: S.time, st: S.started ? 1 : 0, ov: S.over, lp: S.lab.p, lc: S.lab.cd, lt: S.lab.tm, sd: S.sudden ? 1 : 0 }, e, pk, p: S.players };
+  return { t: 's', g: { t: S.time, st: S.started ? 1 : 0, ov: S.over, lp: S.lab.p, lc: S.lab.cd, lt: S.lab.tm, sd: S.sudden ? 1 : 0, rm: +S.rampOn.toFixed(1), rn: Math.ceil(S.rampT) }, e, pk, p: S.players };
 }
 function onClientMsg(pid, m) {
   if (!S) return; const tm = S.teamOf[pid] ?? 0;
@@ -611,6 +649,7 @@ function updateViews(dt, time) {
     if (pv.inst.sm) pv.inst.sm.material = shroom && pv.tm !== me.team ? XRAYMAT : BAKEMAT;
     pv.inst.play(p.st === 2 ? 'Attack' : p.st === 1 ? 'Walk' : p.st === 4 ? 'Aim' : 'Idle'); pv.inst.mixer.update(dt);
   }
+  { const on = padsOn(); for (const pv of padViews) { pv.mat.color.setHex(on ? PADCOL[pv.p.k] : 0x444444); pv.mat.opacity = on ? 0.72 + 0.22 * Math.sin(time * 8 + pv.p.x) : 0.28; if (pv.p.k === 2) pv.g.children[0].rotation.z = on ? time * 2 : 0; for (const e of pv.ex) e.visible = on; } }
   for (const d of deco) d.mixer.update(dt);
   if (labWisp) labWisp.g.position.y = 2.4 + Math.sin(time * 2) * 0.4;
   const cd = G.lc > 0; labRing.material.color.setHex(cd ? 0x555555 : G.lt >= 0 ? TEAMCOL[G.lt] : 0xffe600); labFill.material.color.setHex(G.lt >= 0 ? TEAMCOL[G.lt] : 0xffe600); labFill.material.opacity = cd ? 0.05 : 0.12 + 0.5 * G.lp / 100;
@@ -659,7 +698,7 @@ function onPKill(ev) {
   if (ev.by !== me.id || ev.v === me.id) return;
   me.pk++; gainXp(120); me.hp = Math.min(me.mhp, me.hp + 30); const k = Math.floor(Math.random() * 5); me.inv[k]++;
   const H = HEROES[me.hero]; me.multi = me.multiT > 0 ? me.multi + 1 : 1; me.multiT = 4;
-  banner(H.id === 'sniper' && !me.ads ? (me.ground ? 'NOSCOPE' : '360 NOSCOPE') : 'CLAPPED ' + nameOf(ev.v), 'looted 1 ' + DRUGS[k].name + ' off ' + nameOf(ev.v), true, '#ffe600');
+  banner(H.id === 'sniper' && !me.ads ? (me.ground ? 'NOSCOPE' : '360 NOSCOPE') : (me.ground ? 'CLAPPED ' : 'MID-AIR CLAP: ') + nameOf(ev.v), 'looted 1 ' + DRUGS[k].name + ' off ' + nameOf(ev.v), true, '#ffe600');
   addStreak(3);
 }
 function onKill(ev) {
@@ -685,7 +724,7 @@ function gotPick(k) {
 // ============================== CLIENT: me
 function spawnPos(tm) { const b = BASES[tm], l = hyp(b.x, b.z); return { x: b.x - b.x / l * 19 + rnd(-5, 5), z: b.z - b.z / l * 19 + rnd(-5, 5), yaw: Math.atan2(-b.x, -b.z) }; }
 function resetMe() {
-  const H = HEROES[me.hero], sp = spawnPos(me.team); Object.assign(me, { x: sp.x, y: 0, z: sp.z, vy: 0, yaw: sp.yaw, face: sp.yaw, pitch: 0, hp: H.hp, mhp: H.hp, shield: 0, ammo: H.gun.mag, reloadT: 0, fireT: 0, qT: 0, dashT: 0, down: 0, willElim: false, elim: false, safeT: 3, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, inv: [1, 1, 1, 1, 0], fx: [0, 0, 0, 0, 0], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0, strike: 0, nuke: 0, scale: 1 });
+  const H = HEROES[me.hero], sp = spawnPos(me.team); Object.assign(me, { x: sp.x, y: 0, z: sp.z, vy: 0, yaw: sp.yaw, face: sp.yaw, pitch: 0, hp: H.hp, mhp: H.hp, shield: 0, ammo: H.gun.mag, reloadT: 0, fireT: 0, qT: 0, dashT: 0, down: 0, willElim: false, elim: false, safeT: 3, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, inv: [1, 1, 1, 1, 0], fx: [0, 0, 0, 0, 0], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0, strike: 0, nuke: 0, scale: 1, kx: 0, kz: 0, padT: 0, boostT: 0 });
   $('center').style.display = 'none';
   if (me.inst) { if (me.ring) me.inst.g.remove(me.ring); me.ring = teamRing(me.inst, me.team); }
 }
@@ -826,15 +865,28 @@ function updateMe(dt, time) {
   me.ads = !!keys.RMB && me.down <= 0;
   let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
   const l = hyp(fx, fz); me.moving = l > 0 && me.down <= 0;
-  let spd = H.spd * (keys.ShiftLeft && !me.ads ? 1.45 : 1) * (fxOn('zoom') ? 1.7 : 1) * (giant ? 0.9 : 1) * (me.comedown > 0 ? 0.72 : 1) * (me.ads ? 0.6 : 1);
+  let spd = H.spd * (keys.ShiftLeft && !me.ads ? 1.45 : 1) * (fxOn('zoom') ? 1.7 : 1) * (giant ? 0.9 : 1) * (me.comedown > 0 ? 0.72 : 1) * (me.ads ? 0.6 : 1) * (me.boostT > 0 ? 1.8 : 1);
   if (me.dashT > 0) { me.dashT -= dt; me.x += me.dashX * 42 * dt; me.z += me.dashZ * 42 * dt; }
   else if (me.moving) { fx /= l; fz /= l; const wx = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx, wz = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.x += wx * spd * dt; me.z += wz * spd * dt; if (me.shotT <= 0 && !me.ads) me.face = angLerp(me.face, Math.atan2(wx, wz), Math.min(1, dt * 12)); }
+  // launch velocity from ramps: carries through the air, bleeds off fast on the ground
+  me.x += me.kx * dt; me.z += me.kz * dt; { const fr = Math.exp(-(me.ground ? 6 : 0.45) * dt); me.kx *= fr; me.kz *= fr; }
+  me.padT -= dt; me.boostT -= dt;
+  if (padsOn() && me.down <= 0 && me.padT <= 0) for (const p of PADS) {
+    const d = hyp(p.x - me.x, p.z - me.z);
+    if (p.k === 2 ? (d < 3.7 && me.y < 7) : (d < 2.9 * Math.max(1, me.scale * 0.7) && me.y < 0.7)) {
+      me.padT = 0.6;
+      if (p.k === 0) { me.kx = p.dx * 36; me.kz = p.dz * 36; me.vy = 15; me.y = Math.max(me.y, 0.1); me.ground = false; toast('SEND IT', 1); SFX.dash(); tone(200, 0.4, 'sawtooth', 0.07, 900); }
+      else if (p.k === 1) { me.vy = 24; me.y = Math.max(me.y, 0.1); me.ground = false; toast('BOING', 0.8); tone(180, 0.35, 'sine', 0.2, 720); }
+      else { me.boostT = 5; toast('SPEED GATE: gotta go fast', 1.2); SFX.dash(); }
+      break;
+    }
+  }
   if (me.shotT > 0 || me.ads) me.face = angLerp(me.face, me.yaw, Math.min(1, dt * 20));
   if (keys.Space && me.ground && me.down <= 0) { me.vy = fxOn('stonk') ? 13 : 9; me.ground = false; }
   me.vy -= (fxOn('stonk') ? 12 : 26) * dt; me.y += me.vy * dt;
   if (me.y <= 0) { if (!me.ground && giant && me.vy < -6) { boomAt(me.x, me.z, 9, 90 * dmgMult(), 0xc98a4a, 0.4); } me.y = 0; me.vy = 0; me.ground = true; }
   const structs = []; for (const v of views.values()) if (v.struct) structs.push(v);
-  const o = { x: me.x, z: me.z }; pushOut(o, 0.8 * me.scale, structs); me.x = o.x; me.z = o.z;
+  const o = { x: me.x, z: me.z, y: me.y }; pushOut(o, 0.8 * me.scale, structs); me.x = o.x; me.z = o.z;
   me.fireBuf -= dt;
   if (me.down <= 0 && !G.ov && (g.auto || AUTO ? firing : me.fireBuf > 0)) { if (tryFire()) me.fireBuf = 0; }
   // fire zones + pending strikes
@@ -878,7 +930,7 @@ function updateCam(dt, time) {
   const cd = hyp(camPos.x, camPos.z); if (cd > ARENA + 1) { camPos.x *= (ARENA + 1) / cd; camPos.z *= (ARENA + 1) / cd; }
   camera.position.copy(camPos); camera.lookAt(_tv.copy(camPos).addScaledVector(camDir, 50));
   camera.rotateZ(Math.sin(time * 1.7) * hi * 0.04 + (me.comedown > 0 ? Math.sin(time * 9) * 0.01 : 0));
-  const fov = (me.ads ? H.gun.zoom : 75) + (fxOn('zoom') ? 14 : 0) + Math.sin(time * 2.3) * hi * 2.5;
+  const fov = (me.ads ? H.gun.zoom : 75) + (fxOn('zoom') ? 14 : 0) + (me.boostT > 0 ? 10 : 0) + Math.sin(time * 2.3) * hi * 2.5;
   camera.fov += (fov - camera.fov) * Math.min(1, dt * 14); camera.updateProjectionMatrix();
   me.inst.g.visible = !scoped;
   let f = '';
@@ -906,7 +958,8 @@ function updateHud(time) {
   let top = '<b id="clock" style="font-size:22px;min-width:70px;text-align:center;color:' + (G.sd ? '#ff3b3b' : '#fff') + '">' + (G.st ? Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') : 'WARMUP') + '</b>';
   for (let tm = 0; tm < 3; tm++) { const ps = Object.values(others).filter(p => p.tm === tm), names = ps.map(p => p.n).join(', ') || 'BOTS', dead = cores[tm] <= 0, last = dead && ps.some(p => p.st !== 5); top += `<div class="tm" style="${tm === me.team ? 'outline:2px solid #fff;' : ''}${dead && !last ? 'opacity:.35;' : ''}"><span style="color:${TEAMS[tm].c}">${names}${last ? ' · LAST LIFE' : dead ? ' · OUT' : ''}</span><div class="cbar"><i style="background:${TEAMS[tm].c};width:${cores[tm] * 100}%"></i></div></div>`; }
   $('top').innerHTML = top;
-  $('labbar').innerHTML = !G.st ? (isHost ? 'WARMUP &middot; <b style="color:#fff">ENTER</b> starts the match (' + Object.keys(others).length + ' in lobby)' : 'WARMUP &middot; waiting for the host to start') + ' &middot; <b style="color:#fff">C</b> changes character' : G.lc > 0 ? 'THE LAB: restocking ' + Math.ceil(G.lc) + 's' : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> is cooking ' + Math.floor(G.lp) + '%' + (G.lt !== me.team ? ' &middot; go ruin it' : '') : 'THE LAB (middle): hold the circle alone to cook a batch';
+  const rampTxt = !G.st ? ' &middot; ramps are on in warmup' : G.rm > 0 ? ' &middot; <b style="color:#ff8a1e">RAMPS ONLINE ' + Math.ceil(G.rm) + 's</b>' : ' &middot; ramps in ' + Math.floor(G.rn / 60) + ':' + String(G.rn % 60).padStart(2, '0');
+  $('labbar').innerHTML = (!G.st ? (isHost ? 'WARMUP &middot; <b style="color:#fff">ENTER</b> starts the match (' + Object.keys(others).length + ' in lobby)' : 'WARMUP &middot; waiting for the host to start') + ' &middot; <b style="color:#fff">C</b> changes character' : G.lc > 0 ? 'THE LAB: restocking ' + Math.ceil(G.lc) + 's' : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> is cooking ' + Math.floor(G.lp) + '%' + (G.lt !== me.team ? ' &middot; go ruin it' : '') : 'THE LAB (middle): hold the circle alone to cook a batch') + rampTxt;
   let th = ''; for (const id in others) { const p = others[id]; th += '<div class="panel" style="border-left:4px solid ' + TEAMS[p.tm].c + '">' + (id === me.id ? '▶ ' : '') + p.n + ' <span style="color:#aaa">' + HEROES[p.h].name + ' L' + p.l + '</span> ' + (p.st === 5 ? '<span style="color:#ff3b3b">OUT</span>' : p.st === 3 ? '<span style="color:#ff3b3b">DEAD</span>' : Math.max(0, p.hp) + 'hp') + ' <span style="color:#ff4fd8">' + p.hi + '%</span> <span style="color:#ffe600">' + (p.pk || 0) + 'PK</span></div>'; } $('team').innerHTML = th;
   if (toastT > 0) { toastT -= 0.1; if (toastT <= 0) $('toast').textContent = ''; }
   if (me.safeT > 0 && G.st) toast('spawn shield ' + me.safeT.toFixed(0) + 's', 0.3);
@@ -918,6 +971,7 @@ function updateHud(time) {
   mctx.lineWidth = 2; mctx.strokeStyle = G.lc > 0 ? '#666' : G.lt >= 0 ? TEAMS[G.lt].c : '#ffe600'; mctx.beginPath(); mctx.arc(mx(0, 0), mz(0, 0), 7, 0, 7); mctx.stroke();
   for (const v of views.values()) { mctx.fillStyle = TEAMS[v.team].c; const s = v.struct ? (v.t === 'co' ? 10 : 6) : v.t === 'mam' ? 6 : 3; mctx.fillRect(mx(v.x, v.z) - s / 2, mz(v.x, v.z) - s / 2, s, s); }
   for (const p of pickViews.values()) { mctx.fillStyle = p.k === 9 ? '#19e3ff' : DRUGS[p.k].col; mctx.beginPath(); mctx.arc(mx(p.x, p.z), mz(p.x, p.z), p.k === 9 ? 4 : 2, 0, 7); mctx.fill(); }
+  if (padsOn()) for (const p of PADS) { mctx.fillStyle = ['#ff8a1e', '#ff4fd8', '#19e3ff'][p.k]; mctx.fillRect(mx(p.x, p.z) - 1.5, mz(p.x, p.z) - 1.5, 3, 3); }
   const shroom = fxOn('shroom');
   for (const pv of pviews.values()) { const st = pv.s.st; if (st === 5 || st === 3) continue; if (pv.tm !== me.team && st !== 2 && !shroom && (pv.s.sc || 1) < 1.5 && cores[pv.tm] > 0) continue; mctx.fillStyle = TEAMS[pv.tm].c; mctx.strokeStyle = '#fff'; mctx.beginPath(); mctx.arc(mx(pv.x, pv.z), mz(pv.x, pv.z), 5, 0, 7); mctx.fill(); mctx.stroke(); }
   mctx.save(); mctx.translate(mx(me.x, me.z), mz(me.x, me.z)); mctx.rotate(-(me.yaw + dl)); mctx.fillStyle = '#fff'; mctx.beginPath(); mctx.moveTo(0, -7); mctx.lineTo(5, 5); mctx.lineTo(-5, 5); mctx.fill(); mctx.restore();
@@ -979,7 +1033,7 @@ function start(asHost) {
   else joinPeer(code);
   running = true; last = performance.now(); requestAnimationFrame(frame);
   if (!AUTO) lockPtr();
-  window.DBG = { me, views, pviews, keys, setHero, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
+  window.DBG = { me, views, pviews, keys, setHero, PADS, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
     step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { const time = performance.now() / 1000 + i * dt; updateMe(dt, time); updateViews(dt, time); updateFx(dt); updateCam(dt, time); } renderer.render(scene, camera); }, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
 }
 $('bHost').onclick = () => start(true); $('bJoin').onclick = () => start(false);
