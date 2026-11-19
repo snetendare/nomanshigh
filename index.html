@@ -121,7 +121,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>LMB</b> shoot &middot; <b>RMB</b> aim &middot; <b>R</b> reload<br>
     <b>1-5</b> take a substance &middot; <b>Q</b> hero ability<br>
     Killing a player loots product off them and counts 3 toward your streak<br>
-    <b>G</b> chemtrail strike &middot; <b>N</b> tactical nuke &middot; <b>M</b> music &middot; <b>L</b> copy invite link<br>
+    <b>G</b> chemtrail strike &middot; <b>N</b> tactical nuke &middot; <b>M</b> music &middot; <b>L</b> copy invite link &middot; <b>[ ]</b> mouse sensitivity<br>
     <b>HIGH METER:</b> every point is +1% damage. Stack substances for cocktail bonuses. Go over 100% and you green out.<br>
     <b>WIN:</b> everyone has a stash and two towers. Your fiends march at both rivals. Drop a tower to expose a stash, destroy the stash to knock that player out (they get one last life). Last stash standing wins. Sudden death at 10:00.<br>
     <b>THE LAB:</b> hold the middle circle alone to cook a batch: free supply and giant fiends sent at both rivals. Kill the pink elephant there and it fights for you.<br>
@@ -375,7 +375,7 @@ let G = { t: 0, st: 0, ov: 0, lp: 0, lc: 0, lt: -1, sd: 0 }; let others = {};
 const views = new Map(), pickViews = new Map(), pviews = new Map();
 const me = { id: 'host', team: 0, ready: false, name: 'PLAYER', hero: 0, x: 0, y: 0, z: -74, vy: 0, yaw: 0, pitch: 0, face: 0, hp: 100, mhp: 100, shield: 0, ammo: 0, reloadT: 0, fireT: 0, shotT: 0, qT: 0, dashT: 0, dashX: 0, dashZ: 0,
   down: 0, downKind: '', willElim: false, elim: false, safeT: 0, lastBy: '', lastByT: 0, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, inv: [1, 1, 1, 1, 0], fx: [0, 0, 0, 0, 0], fxMax: [1, 1, 1, 1, 1], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0,
-  strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null };
+  strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0 };
 const keys = {}; let firing = false, locked = false;
 const fxOn = id => me.fx[DI[id]] > 0;
 function hostBroadcast(m) { for (const c of conns.values()) if (c.open) try { c.send(m); } catch (e) {} }
@@ -721,7 +721,12 @@ function aoe(x, z, r, dmg, skip) {
 }
 function boomAt(x, z, r, dmg, color, life) { fxBoom(x, 1, z, r, color, life || 0.5); SFX.expl(); aoe(x, z, r, dmg); sendHost({ t: 'fx', x, z, r, c: color, l: life || 0.5 }); }
 const _tv = new THREE.Vector3(), camDir = new THREE.Vector3(0, 0, 1), camPos = new THREE.Vector3();
-let camDist = 6;
+let camDist = 6, camLen = 6;
+function camBlocked(p) {
+  for (const b of OBST) if (p.y < b.h + 0.4 && hyp(p.x - b.x, p.z - b.z) < b.r * (b.k === 0 ? 1.5 : 1.1) + 0.4) return true;
+  for (const v of views.values()) if (v.struct && p.y < v.h && hyp(p.x - v.x, p.z - v.z) < v.r + 0.4) return true;
+  return false;
+}
 function rayCyl(o, d, cx, cz, r, h) {
   const l2 = d.x * d.x + d.z * d.z; if (l2 < 1e-6) return -1;
   const tc = ((cx - o.x) * d.x + (cz - o.z) * d.z) / l2; if (tc < 0) return -1;
@@ -731,10 +736,10 @@ function rayCyl(o, d, cx, cz, r, h) {
   return te;
 }
 function castShot(o, d) {
-  const tmin = camDist * 0.85; let bt = 260, bv = null;
+  const tmin = camLen * 0.85; let bt = 260, bv = null;
   if (d.y < -1e-4) bt = Math.min(bt, -o.y / d.y);
   for (const b of OBST) { const t = rayCyl(o, d, b.x, b.z, b.r, b.h); if (t > tmin && t < bt) bt = t; }
-  for (const v of views.values()) { if (v.hp <= 0) continue; const t = rayCyl(o, d, v.x, v.z, v.r * (v.struct ? 1 : 1.15), v.h * 1.05); if (t > tmin && t < bt) { bt = t; bv = v.team === me.team ? null : v; } }
+  for (const v of views.values()) { if (v.hp <= 0 || (v.team === me.team && !v.struct)) continue; const t = rayCyl(o, d, v.x, v.z, v.r * (v.struct ? 1 : 1.15), v.h * 1.05); if (t > tmin && t < bt) { bt = t; bv = v.team === me.team ? null : v; } }
   for (const pv of pviews.values()) { const st = pv.s.st; if (st === 3 || st === 5 || pv.tm === me.team) continue; const sc = pv.s.sc || 1, t = rayCyl(o, d, pv.x, pv.z, 0.85 * sc, pv.y + pv.h * sc * 1.05); if (t > tmin && t < bt) { bt = t; bv = pv; } }
   const p = new THREE.Vector3().copy(o).addScaledVector(d, bt); let hs = false;
   if (bv && bv.pid) hs = bv.s.st !== 6 && p.y > bv.y + bv.h * (bv.s.sc || 1) * 0.8;
@@ -755,7 +760,8 @@ function tryFire() {
     if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (shroom && !res.v.struct); hitEnt(res.v, g.dmg * mult * (hs ? g.hs : 1), hs, res.p); if (stonk) { fxBoom(res.p.x, res.p.y, res.p.z, 3.5, 0x00ff7b, 0.25); aoe(res.p.x, res.p.z, 3.5, g.dmg * mult * 0.5, res.v); } }
     else if (res.v) toast('shielded: drop one of its towers first', 1.5);
   }
-  me.pitch = Math.min(1.3, me.pitch + (g.zoom < 30 ? 0.05 : g.pellets > 1 ? 0.035 : 0.006));
+  me.recoil = Math.min(0.12, me.recoil + (g.zoom < 30 ? 0.045 : g.pellets > 1 ? 0.03 : 0.005));
+  return true;
 }
 const zones = [], pending = [];
 function ability() {
@@ -810,7 +816,8 @@ function updateMe(dt, time) {
   if (me.y <= 0) { if (!me.ground && giant && me.vy < -6) { boomAt(me.x, me.z, 9, 90 * dmgMult(), 0xc98a4a, 0.4); } me.y = 0; me.vy = 0; me.ground = true; }
   const structs = []; for (const v of views.values()) if (v.struct) structs.push(v);
   const o = { x: me.x, z: me.z }; pushOut(o, 0.8 * me.scale, structs); me.x = o.x; me.z = o.z;
-  if (firing && me.down <= 0 && !G.ov) { tryFire(); if (!g.auto) firing = false; }
+  me.fireBuf -= dt;
+  if (me.down <= 0 && !G.ov && (g.auto || AUTO ? firing : me.fireBuf > 0)) { if (tryFire()) me.fireBuf = 0; }
   // fire zones + pending strikes
   for (let i = zones.length - 1; i >= 0; i--) { const zn = zones[i]; zn.life -= dt; zn.tick -= dt; if (zn.tick <= 0) { zn.tick = 0.5; aoe(zn.x, zn.z, zn.r, zn.dps * 0.5); fxBoom(zn.x, 0.5, zn.z, zn.r, 0xff6a1e, 0.45); } if (zn.life <= 0) zones.splice(i, 1); }
   for (let i = pending.length - 1; i >= 0; i--) { const p = pending[i]; if ((p.t -= dt) <= 0) { boomAt(p.x, p.z, p.r, p.dmg, p.c, 0.7); pending.splice(i, 1); } }
@@ -841,16 +848,18 @@ function updateCam(dt, time) {
     canvas.style.filter = ''; $('scope').style.display = 'none'; $('cross').style.display = 'none'; me.inst.g.visible = false; return;
   }
   const H = HEROES[me.hero], hi = me.high / 100, shroom = fxOn('shroom');
-  const cp = Math.cos(me.pitch); camDir.set(Math.sin(me.yaw) * cp, Math.sin(me.pitch), Math.cos(me.yaw) * cp);
+  const pt = clamp(me.pitch + me.recoil, -1.25, 1.35), cp = Math.cos(pt); camDir.set(Math.sin(me.yaw) * cp, Math.sin(pt), Math.cos(me.yaw) * cp); me.recoil *= Math.exp(-dt * 9);
   const scoped = me.ads && H.gun.zoom < 30;
   camDist += ((scoped ? 0.2 : me.ads ? 3.6 : 6) * me.scale - camDist) * Math.min(1, dt * 12);
   const sh = scoped ? 0 : 1.0 * me.scale;
-  camPos.set(me.x - Math.cos(me.yaw) * sh, me.y + (scoped ? 1.7 : 2.3) * me.scale, me.z + Math.sin(me.yaw) * sh).addScaledVector(camDir, -camDist);
+  const pvx = me.x - Math.cos(me.yaw) * sh, pvy = me.y + (scoped ? 1.7 : 2.3) * me.scale, pvz = me.z + Math.sin(me.yaw) * sh;
+  camLen = camDist; camPos.set(pvx, pvy, pvz).addScaledVector(camDir, -camLen);
+  if (!scoped) for (let i = 0; i < 14 && camLen > 1 && camBlocked(camPos); i++) { camLen -= 0.5; camPos.set(pvx, pvy, pvz).addScaledVector(camDir, -camLen); }
   if (camPos.y < 0.4) camPos.y = 0.4;
   const cd = hyp(camPos.x, camPos.z); if (cd > ARENA + 1) { camPos.x *= (ARENA + 1) / cd; camPos.z *= (ARENA + 1) / cd; }
   camera.position.copy(camPos); camera.lookAt(_tv.copy(camPos).addScaledVector(camDir, 50));
-  camera.rotateZ(Math.sin(time * 1.7) * hi * 0.07 + (me.comedown > 0 ? Math.sin(time * 9) * 0.01 : 0));
-  const fov = (me.ads ? H.gun.zoom : 75) + (fxOn('zoom') ? 14 : 0) + Math.sin(time * 2.3) * hi * 7;
+  camera.rotateZ(Math.sin(time * 1.7) * hi * 0.04 + (me.comedown > 0 ? Math.sin(time * 9) * 0.01 : 0));
+  const fov = (me.ads ? H.gun.zoom : 75) + (fxOn('zoom') ? 14 : 0) + Math.sin(time * 2.3) * hi * 2.5;
   camera.fov += (fov - camera.fov) * Math.min(1, dt * 14); camera.updateProjectionMatrix();
   me.inst.g.visible = !scoped;
   let f = '';
@@ -908,6 +917,7 @@ function frame(now) {
 addEventListener('keydown', e => {
   if (!running || e.repeat) return; keys[e.code] = true;
   if (e.code.startsWith('Digit')) { const k = +e.code[5] - 1; if (k >= 0 && k < 5) takeDrug(k); }
+  if (e.code === 'BracketLeft' || e.code === 'BracketRight') { sens = clamp(sens * (e.code === 'BracketLeft' ? 0.9 : 1.1), 0.2, 4); try { localStorage.setItem('nmh_sens', sens.toFixed(2)); } catch (x) {} toast('mouse sensitivity ' + Math.round(sens * 100) + '%', 1.2); }
   if (e.code === 'KeyR') reload(); if (e.code === 'KeyQ') ability(); if (e.code === 'KeyG') strike(); if (e.code === 'KeyN') nuke();
   if (e.code === 'KeyM') { musicOn = !musicOn; musicOn && G.st ? bgm.play().catch(() => {}) : bgm.pause(); toast('music ' + (musicOn ? 'on' : 'off')); }
   if (e.code === 'Enter' && isHost) { if (S.over) { hostReset(); emit({ t: 'reset' }); } else if (!S.started) startMatch(); }
@@ -915,11 +925,20 @@ addEventListener('keydown', e => {
   if (e.code === 'Space' || e.code === 'Tab') e.preventDefault();
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
-canvas.addEventListener('mousedown', e => { if (!running) return; audioInit(); if (!locked) { canvas.requestPointerLock && canvas.requestPointerLock(); return; } if (e.button === 0) firing = true; if (e.button === 2) keys.RMB = true; });
+canvas.addEventListener('mousedown', e => { if (!running) return; audioInit(); if (!locked) { lockPtr(); return; } if (e.button === 0) { firing = true; me.fireBuf = 0.3; } if (e.button === 2) keys.RMB = true; });
 addEventListener('mouseup', e => { if (e.button === 0) firing = false; if (e.button === 2) keys.RMB = false; });
 addEventListener('contextmenu', e => e.preventDefault());
 document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === canvas; if (!locked) { firing = false; keys.RMB = false; } });
-addEventListener('mousemove', e => { if (!locked) return; const s = 0.0022 * (me.ads ? HEROES[me.hero].gun.zoom / 75 : 1); me.yaw -= e.movementX * s; me.pitch = clamp(me.pitch - e.movementY * s, -1.2, 1.3); });
+let sens = 1; try { sens = clamp(+localStorage.getItem('nmh_sens') || 1, 0.2, 4); } catch (e) {}
+let lmx = 0, lmy = 0;
+function lockPtr() { try { const p = canvas.requestPointerLock({ unadjustedMovement: true }); if (p && p.catch) p.catch(() => { try { canvas.requestPointerLock(); } catch (e) {} }); } catch (e) { try { canvas.requestPointerLock(); } catch (x) {} } }
+addEventListener('mousemove', e => {
+  if (!locked) return; const dx = e.movementX || 0, dy = e.movementY || 0;
+  // the browser sometimes reports one huge bogus jump while the pointer is locked: drop a move wildly out of line with the last one
+  if (Math.abs(dx) > 150 + Math.abs(lmx) * 6 || Math.abs(dy) > 150 + Math.abs(lmy) * 6) { lmx = lmy = 50; return; }
+  lmx = dx; lmy = dy;
+  const s = 0.0022 * sens * (me.ads ? HEROES[me.hero].gun.zoom / 75 : 1); me.yaw -= dx * s; me.pitch = clamp(me.pitch - dy * s, -1.2, 1.3);
+});
 
 // ============================== lobby
 let selHero = +(Q.get('hero') || 0), loaded = false;
@@ -938,8 +957,9 @@ function start(asHost) {
   if (asHost) { isHost = true; me.id = 'host'; me.team = 0; me.ready = true; roomCode = (Q.get('host') || '').toUpperCase(); hostReset(); setInterval(hostLoop, 33); openHostPeer(); if (Q.get('go') === '1') setTimeout(startMatch, 500); }
   else joinPeer(code);
   running = true; last = performance.now(); requestAnimationFrame(frame);
-  if (!AUTO) canvas.requestPointerLock && canvas.requestPointerLock();
-  window.DBG = { me, views, pviews, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
+  if (!AUTO) lockPtr();
+  window.DBG = { me, views, pviews, keys, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
+    step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { const time = performance.now() / 1000 + i * dt; updateMe(dt, time); updateViews(dt, time); updateFx(dt); updateCam(dt, time); } renderer.render(scene, camera); }, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
 }
 $('bHost').onclick = () => start(true); $('bJoin').onclick = () => start(false);
 loadAssets().then(() => { loaded = true; $('bHost').disabled = $('bJoin').disabled = false; $('lobMsg').textContent = Q.get('room') ? 'room ' + $('code').value + ' is loaded in. pick a hero and hit JOIN.' : 'host a room and send your two rivals the link. or practice against bots.'; if (Q.get('host')) start(true); else if (AUTO && Q.get('room')) start(false); })
