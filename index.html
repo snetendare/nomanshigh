@@ -146,6 +146,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
+const BUILD = 9;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -388,9 +389,9 @@ function genCode() { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; let s = ''; for (let 
 function openHostPeer() {
   roomCode = roomCode || genCode();
   try { peer = new Peer(PFX + roomCode); } catch (e) { netMsg('Offline: solo only'); return; }
-  peer.on('open', () => { const link = location.origin + location.pathname + '?room=' + roomCode; netMsg('ROOM <b style="font-size:22px;color:#fff">' + roomCode + '</b> &middot; ' + link + ' &middot; press <b style="color:#fff">L</b> to copy the invite link'); });
+  peer.on('open', () => { const link = location.origin + location.pathname + '?room=' + roomCode; netMsg('ROOM <b style="font-size:22px;color:#fff">' + roomCode + '</b> &middot; ' + link + ' &middot; press <b style="color:#fff">L</b> to copy the invite link &middot; build ' + BUILD); });
   peer.on('connection', c => {
-    c.on('open', () => { const cnt = [0, 0, 0]; for (const k in S.teamOf) cnt[S.teamOf[k]]++; const tm = cnt.indexOf(Math.min(...cnt)); S.teamOf[c.peer] = tm; conns.set(c.peer, c); c.send({ t: 'hello', team: tm }); });
+    c.on('open', () => { const cnt = [0, 0, 0]; for (const k in S.teamOf) cnt[S.teamOf[k]]++; const tm = cnt.indexOf(Math.min(...cnt)); S.teamOf[c.peer] = tm; conns.set(c.peer, c); c.send({ t: 'hello', team: tm, b: BUILD }); });
     c.on('data', m => onClientMsg(c.peer, m));
     c.on('close', () => { const p = S.players[c.peer]; if (p) emit({ t: 'feed', m: p.n + ' rage quit' }); conns.delete(c.peer); delete S.players[c.peer]; delete S.teamOf[c.peer]; });
   });
@@ -622,7 +623,7 @@ function nameOf(pid) { return pid === me.id ? me.name : (others[pid] ? others[pi
 function tagOf(pid) { const tm = pid === me.id ? me.team : (others[pid] ? others[pid].tm : NEU); return '<span style="color:' + TEAMS[tm].c + '">' + nameOf(pid) + '</span>'; }
 function onEvent(ev) {
   switch (ev.t) {
-    case 'hello': me.team = ev.team; me.ready = true; resetMe(); banner('YOU ARE ' + TEAMS[me.team].n, 'defend your stash. bust theirs.', false, TEAMS[me.team].c); break;
+    case 'hello': me.team = ev.team; me.ready = true; resetMe(); if (ev.b !== BUILD) { setTimeout(() => { banner('VERSION MISMATCH', 'you: build ' + BUILD + ', host: build ' + (ev.b || 'old') + '. everyone press Ctrl+F5.', false, '#ff3b3b'); netMsg('<b style="color:#ff3b3b">VERSION MISMATCH</b>: you are on build ' + BUILD + ', the host on ' + (ev.b || 'an older one') + '. Everyone press Ctrl+F5.'); }, 2500); } banner('YOU ARE ' + TEAMS[me.team].n, 'defend your stash. bust theirs.', false, TEAMS[me.team].c); break;
     case 'hurt': if (ev.to === me.id) takeDamage(ev.d, ev.et, ev.by); break;
     case 'shot': tracer(new THREE.Vector3(...ev.a), new THREE.Vector3(...ev.b), TEAMCOL[ev.c], 0.12, 0.16); break;
     case 'kill': onKill(ev); break;
@@ -964,6 +965,7 @@ let selHero = +(Q.get('hero') || 0), loaded = false;
 $('heroes').innerHTML = HEROES.map((h, i) => `<div class="hero" data-i="${i}"><h3>${h.name}</h3><p>${h.desc}<br>${h.hp} HP &middot; ${h.gun.name}</p></div>`).join('');
 function selH(i) { selHero = i; document.querySelectorAll('.hero').forEach((e, j) => e.classList.toggle('sel', j === i)); }
 document.querySelectorAll('.hero').forEach(e => e.onclick = () => selH(+e.dataset.i)); selH(selHero);
+document.querySelector('.sub').innerHTML += ' &middot; build ' + BUILD;
 $('nm').value = Q.get('name') || localStorage.getItem('nmh_name') || '';
 if (Q.get('room')) { $('code').value = Q.get('room').toUpperCase(); $('lobMsg').textContent = 'loading the goods...'; }
 function start(asHost) {
