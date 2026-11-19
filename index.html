@@ -146,16 +146,16 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 9;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 10;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
-  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 120, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken).',
+  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 } },
   { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 9.1, col: 0xff7a3d, desc: 'Full-auto spray n pray, 40 round mag. <b>Q: Molotov</b> (burst + burning ground where you aim).',
     gun: { name: 'SPRAY N PRAY', dmg: 12, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50 }, q: { name: 'MOLOTOV', cd: 8 } },
-  { id: 'brute', name: 'THE BOUNCER', model: 'brute', hp: 220, spd: 8.3, col: 0xd0a070, desc: 'Tanky boomstick enjoyer, 9 pellets a shell. <b>Q: Ground Pound</b> (big slam around you).',
-    gun: { name: 'BOOMSTICK', dmg: 11, rate: 0.72, mag: 6, reload: 1.9, spread: 0.055, pellets: 9, hs: 1.4, auto: false, zoom: 55 }, q: { name: 'GROUND POUND', cd: 9 } },
+  { id: 'brute', name: 'THE BOUNCER', model: 'brute', hp: 220, spd: 8.3, col: 0xd0a070, desc: 'Tanky boomstick enjoyer, 9 pellets a shell. Close range only: pellets fade fast and vanish past 20 m. <b>Q: Ground Pound</b> (big slam around you).',
+    gun: { name: 'BOOMSTICK', dmg: 11, rate: 0.72, mag: 6, reload: 1.9, spread: 0.055, pellets: 9, hs: 1.4, auto: false, zoom: 55, range: 20 }, q: { name: 'GROUND POUND', cd: 9 } },
 ];
 const DRUGS = [
   { id: 'zoom', name: 'G-FUEL X', tag: 'ZOOMIES', sub: '+70% speed, +60% fire rate', col: '#19e3ff', dur: 10, dose: 28 },
@@ -754,8 +754,8 @@ function rayCyl(o, d, cx, cz, r, h) {
   if (y < 0 || y > h) { const y2 = o.y + d.y * tc; if (y2 < 0 || y2 > h) return -1; return tc; }
   return te;
 }
-function castShot(o, d) {
-  const tmin = camLen * 0.85; let bt = 260, bv = null;
+function castShot(o, d, range) {   // range: how far from the player the shot reaches (none = across the map)
+  const tmin = camLen * 0.85; let bt = range ? camLen + range : 260, bv = null;
   if (d.y < -1e-4) bt = Math.min(bt, -o.y / d.y);
   for (const b of OBST) { const t = rayCyl(o, d, b.x, b.z, b.r, b.h); if (t > tmin && t < bt) bt = t; }
   for (const v of views.values()) { if (v.hp <= 0 || (v.team === me.team && !v.struct)) continue; const t = rayCyl(o, d, v.x, v.z, v.r * (v.struct ? 1 : 1.15), v.h * 1.05); if (t > tmin && t < bt) { bt = t; bv = v.team === me.team ? null : v; } }
@@ -763,7 +763,7 @@ function castShot(o, d) {
   const p = new THREE.Vector3().copy(o).addScaledVector(d, bt); let hs = false;
   if (bv && bv.pid) hs = bv.s.st !== 6 && p.y > bv.y + bv.h * (bv.s.sc || 1) * 0.8;
   else if (bv && !bv.struct) hs = (bv.t === 'gob' || bv.t === 'arc' || bv.t === 'nec') && p.y > bv.h * 0.74;
-  return { p, v: bv, hs };
+  return { p, v: bv, hs, dist: Math.max(0, bt - camLen) };
 }
 function muzzle() { return new THREE.Vector3(me.x - Math.cos(me.yaw) * 0.5 * me.scale + Math.sin(me.yaw) * 0.9, me.y + 1.45 * me.scale, me.z + Math.sin(me.yaw) * 0.5 * me.scale + Math.cos(me.yaw) * 0.9); }
 function reload() { const H = HEROES[me.hero]; if (me.reloadT > 0 || me.ammo >= H.gun.mag) return; me.reloadT = H.gun.reload / (fxOn('zoom') ? 1.6 : 1); SFX.reload(); }
@@ -775,8 +775,8 @@ function tryFire() {
   for (let i = 0; i < g.pellets; i++) {
     const d = camDir.clone(), sp = g.spread * (me.ads ? 0.45 : 1) + (g.zoom < 30 && !me.ads ? 0.045 : 0);
     d.x += rnd(-sp, sp); d.y += rnd(-sp, sp); d.z += rnd(-sp, sp); d.normalize();
-    const res = castShot(camPos, d); tracer(mz, res.p, stonk ? 0x00ff7b : H.col, g.pellets > 1 ? 0.05 : g.zoom < 30 ? 0.14 : 0.07, g.zoom < 30 ? 0.3 : 0.09);
-    if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (shroom && !res.v.struct); hitEnt(res.v, g.dmg * mult * (hs ? g.hs : 1), hs, res.p); if (stonk) { fxBoom(res.p.x, res.p.y, res.p.z, 3.5, 0x00ff7b, 0.25); aoe(res.p.x, res.p.z, 3.5, g.dmg * mult * 0.5, res.v); } }
+    const res = castShot(camPos, d, g.range), fall = g.range ? clamp(1 - (res.dist - g.range * 0.4) / (g.range * 0.6) * 0.7, 0.3, 1) : 1; tracer(mz, res.p, stonk ? 0x00ff7b : H.col, g.pellets > 1 ? 0.05 : g.zoom < 30 ? 0.14 : 0.07, g.zoom < 30 ? 0.3 : 0.09);
+    if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (shroom && !res.v.struct); hitEnt(res.v, g.dmg * mult * fall * (hs ? g.hs : 1), hs, res.p); if (stonk) { fxBoom(res.p.x, res.p.y, res.p.z, 3.5, 0x00ff7b, 0.25); aoe(res.p.x, res.p.z, 3.5, g.dmg * mult * fall * 0.5, res.v); } }
     else if (res.v) toast('shielded: drop one of its towers first', 1.5);
   }
   me.recoil = Math.min(0.12, me.recoil + (g.zoom < 30 ? 0.045 : g.pellets > 1 ? 0.03 : 0.005));
