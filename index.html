@@ -127,7 +127,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>1-5</b> take a substance (5 is water: a pure heal)<br>
     <b>B</b> recall home (4 s) &middot; <b>F</b> shop at your stash<br>
     <b>C</b> change character in warmup &middot; <b>V</b> emote<br>
-    <b>G</b> strike &middot; <b>N</b> nuke &middot; <b>M</b> music &middot; <b>L</b> invite link &middot; <b>[ ]</b> sensitivity<br>
+    <b>M</b> music &middot; <b>L</b> invite link &middot; <b>[ ]</b> sensitivity<br>
     <b>WIN:</b> each colour has a stash and, on each lane, a T1 tower in front of a T2. Kill the T1 to expose the T2, kill a T2 to expose the stash. A busted stash leaves that player on a last life: kill them too. Last one alive wins. Once every stash is gone a ring closes on the middle.<br>
     <b>COINS:</b> last hits pay coins (so do towers, narcs and bounties). Spend them at your stash on minions, sent at a rival or to the lab, and on substances.<br>
     <b>LEVELS:</b> +6% damage and +8 HP each, shown on everyone's name. Higher level = bigger bounty. Three levels ahead of the lowest and you get a crown and show on every map.<br>
@@ -156,11 +156,11 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 19;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 20;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
-  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken, next shot within 3 s is a guaranteed crit). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
+  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; your next shot within 3 s is a wide laser that pierces and crits everything in its path). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
   { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto spray n pray, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
     gun: { name: 'SPRAY N PRAY', dmg: 10, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50 }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
@@ -734,7 +734,7 @@ function onClientMsg(pid, m) {
   else if (m.t === 'emote') emit({ t: 'emote', by: pid, i: m.i | 0 });
   else if (m.t === 'fx') emit({ ...m, by: pid });
   else if (m.t === 'feed') emit({ t: 'feed', m: m.m });
-  else if (m.t === 'nuke') { for (const e of S.ents.values()) { if (e.team === tm) continue; if (ET[e.t].struct) damageEnt(e, 500, pid); else if (e.t === 'mam') damageEnt(e, 1500, pid); else damageEnt(e, 99999, pid); } emit({ t: 'nuke', by: pid, team: tm }); }
+  else if (m.t === 'beam') emit({ t: 'beam', a: m.a, b: m.b, by: pid });
 }
 // starting wipes whatever happened in warmup: fresh towers, stashes, camps, pickups and lab, and everyone back at their own base
 function startMatch() { hostReset(); S.started = true; emit({ t: 'start' }); }
@@ -883,6 +883,7 @@ function onEvent(ev) {
       if (ev.team === me.team) { banner('YOUR STASH GOT BUSTED', 'last life, no more respawns. you can still win this.', false, '#ff3b3b'); SFX.boom(); } else banner(TEAMS[ev.team].n + ' STASH BUSTED', 'they are on their last life and show on your map. finish them.', true, TEAMS[ev.team].c); break;
     case 'out': feed('<span style="color:' + TEAMS[ev.team].c + '">' + TEAMS[ev.team].n + '</span> is out of the game'); banner(TEAMS[ev.team].n + ' IS OUT', ev.team === me.team ? 'gg go next' : 'one less to worry about', true, TEAMS[ev.team].c); break;
     case 'got': if (ev.to === me.id) gotPick(ev.k); break;
+    case 'beam': if (ev.by !== me.id) drawBeam(ev.a, ev.b); break;
     case 'fx': if (ev.by !== me.id) { fxBoom(ev.x, 1, ev.z, ev.r, ev.c, ev.l || 0.5); SFX.expl(); } break;
     case 'ann': banner(ev.m, ev.s || '', !!ev.horn, ev.c || '#ffe600'); break;
     case 'toast': toast(ev.m); break;
@@ -904,9 +905,8 @@ function addStreak(n) {
   for (let i = 0; i < n; i++) {
     me.streak++;
     if (me.streak === 5) { me.inv[Math.floor(Math.random() * 5)]++; addCoins(50); banner('5 KILLSTREAK', 'care package: +1 product, +50 coins', true, '#19e3ff'); }
-    if (me.streak === 12) { me.strike++; banner('12 KILLSTREAK', 'CHEMTRAIL STRIKE ready: press G', true, '#19e3ff'); }
-    if (me.streak === 25) { me.nuke++; banner('25 KILLSTREAK', 'TACTICAL NUKE ready: press N', true, '#ff3b3b'); }
-    if (me.streak > 25 && me.streak % 15 === 0) { me.strike++; toast('another chemtrail strike: G'); }
+    if (me.streak === 10) { addCoins(100); banner('10 KILLSTREAK', '+100 coins', true, '#19e3ff'); }
+    if (me.streak === 20) { addCoins(200); banner('20 KILLSTREAK', '+200 coins', true, '#ffe600'); }
   }
 }
 function onPKill(ev) {
@@ -1037,6 +1037,7 @@ function tryFire() {
   me.fireT = g.rate / (fxOn('zoom') ? 1.4 : 1); if (me.combo < 4) me.ammo--; me.shotT = 0.3; me.recallT = 0; SFX.shot(me.hero);
   let mult = dmgMult(); if (me.ghT > 0) { mult *= 1.4; me.ghT = 0; toast('ambush: +40%', 1); }
   const crit = me.critT > 0; me.critT = 0;
+  if (crit && H.id === 'sniper') { fireBeam(mult); me.recoil = Math.min(0.12, me.recoil + 0.045); return true; }
   const mz = muzzle();
   for (let i = 0; i < g.pellets; i++) {
     const d = camDir.clone(), sp = g.spread * (me.ads ? 0.45 : 1) + (g.zoom < 30 && !me.ads ? 0.045 : 0);
@@ -1051,7 +1052,7 @@ function tryFire() {
 const zones = [], pending = [];
 function ability() {
   const H = HEROES[me.hero]; if (me.qT > 0 || me.down > 0 || me.elim || me.chargeT > 0) return; me.qT = H.q.cd; me.ghT = 0; me.recallT = 0;
-  if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); me.critT = 3; toast('dive shot: your next shot is a guaranteed crit', 1.5); }
+  if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); me.critT = 3; toast('dive shot: your next shot is a piercing laser', 1.5); }
   else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 42 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 38 * m, life: 4, tick: 0.5 }); }
   else { const m = dmgMult(); boomAt(me.x, me.z, 10, 120 * m, 0xd0a070, 0.5, 14); me.vy = 7; }
 }
@@ -1062,8 +1063,22 @@ function ability2() {
   else if (H.id === 'mage') { const hx = Math.sin(me.yaw), hz = Math.cos(me.yaw); boomAt(me.x, me.z, 8, 68 * dmgMult(), 0xff6a1e, 0.45, 12); me.vy = 21; me.kx = hx * 24; me.kz = hz * 24; me.y = Math.max(me.y, 0.1); me.ground = false; toast('ROCKET JUMP', 1); }
   else { me.chargeT = 0.55; me.chargeX = Math.sin(me.yaw); me.chargeZ = Math.cos(me.yaw); me.chargeHit = new Set(); toast('BULL CHARGE', 1); SFX.dash(); tone(90, 0.5, 'sawtooth', 0.12, 260); }
 }
-function strike() { if (me.strike <= 0 || me.down > 0 || me.elim) return; me.strike--; const res = castShot(camPos, camDir); banner('CHEMTRAIL STRIKE', 'the government is doing this', true, '#19e3ff'); for (let i = -2; i <= 2; i++) pending.push({ x: res.p.x + Math.sin(me.yaw) * i * 7, z: res.p.z + Math.cos(me.yaw) * i * 7, r: 11, dmg: 320 * dmgMult(), t: 1.1 + (i + 2) * 0.18, c: 0x19e3ff }); }
-function nuke() { if (me.nuke <= 0 || me.down > 0 || me.elim) return; me.nuke--; sendHost({ t: 'nuke' }); }
+// The sniper's dive shot: a fat beam along the ground from where you stand, in the direction you aim. It crits every
+// rival minion and player in its path and keeps going; only a rock, mushroom, bottle or building stops it.
+function fireBeam(mult) {
+  const g = HEROES[me.hero].gun, l = hyp(camDir.x, camDir.z) || 1, dx = camDir.x / l, dz = camDir.z / l, R = 1.6, dmg = g.dmg * mult * g.hs;
+  const along = o => (o.x - me.x) * dx + (o.z - me.z) * dz, off = o => Math.abs((o.x - me.x) * dz - (o.z - me.z) * dx);
+  let end = 130, blocker = null;
+  for (const b of OBST) { const pr = along(b); if (pr > 0 && off(b) < b.r && pr - b.r < end) { end = pr - b.r; blocker = null; } }
+  for (const v of views.values()) { if (!v.struct || v.hp <= 0 || v.team === me.team) continue; const pr = along(v); if (pr > 0 && off(v) < v.r && pr - v.r < end) { end = pr - v.r; blocker = v; } }   // your own buildings do not stop it
+  end = Math.max(2, end); let hits = 0;
+  for (const v of views.values()) { if (v.struct || v.team === me.team || v.hp <= 0) continue; const pr = along(v); if (pr > 0 && pr < end + v.r && off(v) < v.r + R) { hitEnt(v, dmg, true, _tv.set(v.x, v.h * 0.7, v.z)); hits++; } }
+  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 3 || st === 5 || pv.tm === me.team) continue; const pr = along(pv); if (pr > 0 && pr < end + 1 && off(pv) < 0.85 * (pv.s.sc || 1) + R) { hitEnt(pv, dmg, true, _tv.set(pv.x, pv.y + 1.6, pv.z)); hits++; } }
+  if (blocker && blocker.team !== me.team && !(blocker.fl & 1)) hitEnt(blocker, g.dmg * mult, false, _tv.set(blocker.x, 3, blocker.z));
+  const y = me.y + 1.4 * me.scale, a = [me.x + dx * 1.2, y, me.z + dz * 1.2], b = [me.x + dx * end, y, me.z + dz * end];
+  drawBeam(a, b); sendHost({ t: 'beam', a, b }); if (hits >= 3) toast('LASER: ' + hits + ' hit', 1.2);
+}
+function drawBeam(a, b) { const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b); tracer(A, B, 0x35e8ff, 1.6, 0.5); tracer(A, B, 0xffffff, 0.5, 0.5); tone(1500, 0.4, 'sawtooth', 0.08, 160); noise(0.35, 0.2, 3200); }
 function recall() { if (me.down > 0 || me.elim || G.ov || me.recallT > 0) return; if (!myCoreAlive()) { toast('no stash to recall to'); return; } if (inBase()) { toast('already home'); return; } me.recallT = 4; toast('recalling: hold still for 4 seconds', 1.5); }
 // ---------- shop (only inside your base ring). keys: 1-4 minions, 5-9 substances, Tab = where minions go
 function shopTargets() { const a = []; for (let t = 0; t < NT; t++) if (t !== me.team && coreHp(t) > 0) a.push({ g: t, n: TEAMS[t].n, c: TEAMS[t].c }); a.push({ g: 3, n: 'THE LAB', c: '#ffe600' }); return a; }
@@ -1223,7 +1238,7 @@ function updateHud(time) {
   $('xpb').firstElementChild.style.width = (me.xp / (45 + 30 * me.lvl) * 100) + '%';
   $('hib').firstElementChild.style.width = clamp(me.high, 0, 100) + '%'; $('hin').textContent = TIERS.find(t => me.high < t[0])[1]; $('hiv').textContent = Math.round(me.high) + '% high · +' + Math.round((dmgMult() - 1) * 100) + '% dmg';
   $('ammo').textContent = me.reloadT > 0 ? 'RELOADING' : me.combo >= 4 ? '∞' : me.ammo + ' / ' + H.gun.mag; $('ammo').style.fontSize = me.reloadT > 0 ? '26px' : '44px'; $('gun').textContent = H.name + ' · ' + H.gun.name;
-  $('abil').innerHTML = '<b>Q</b> ' + H.q.name + (me.qT > 0 ? ' ' + me.qT.toFixed(1) + 's' : ' READY') + (me.critT > 0 ? ' <span style="color:#ffe600">CRIT SHOT ' + me.critT.toFixed(1) + 's</span>' : '') + '<br><b>E</b> ' + H.e.name + (me.ghT > 0 ? ' ACTIVE ' + me.ghT.toFixed(1) + 's' : me.eT > 0 ? ' ' + Math.ceil(me.eT) + 's' : ' READY') + '<br><b>B</b> recall &middot; <b>F</b> shop' + (me.strike ? ' &middot; <b>G</b> STRIKE x' + me.strike : '') + (me.nuke ? ' &middot; <b>N</b> NUKE' : '');
+  $('abil').innerHTML = '<b>Q</b> ' + H.q.name + (me.qT > 0 ? ' ' + me.qT.toFixed(1) + 's' : ' READY') + (me.critT > 0 ? ' <span style="color:#35e8ff">LASER SHOT ' + me.critT.toFixed(1) + 's</span>' : '') + '<br><b>E</b> ' + H.e.name + (me.ghT > 0 ? ' ACTIVE ' + me.ghT.toFixed(1) + 's' : me.eT > 0 ? ' ' + Math.ceil(me.eT) + 's' : ' READY') + '<br><b>B</b> recall &middot; <b>F</b> shop';
   for (let i = 0; i < 5; i++) { const s = $('sl' + i); $('sc' + i).textContent = me.fx[i] > 0 ? me.fx[i].toFixed(0) + 's' : 'x' + me.inv[i]; s.classList.toggle('on', me.fx[i] > 0); s.classList.toggle('zero', me.inv[i] <= 0 && me.fx[i] <= 0); $('stt' + i).style.width = (me.fx[i] > 0 ? me.fx[i] / me.fxMax[i] * 100 : 0) + '%'; }
   $('streak').innerHTML = (me.fed ? '\u{1F451} YOU ARE FED: everyone can see you<br>' : '') + (me.behind > 0 ? 'catching up: +' + Math.round((xpScale() - 1) * 100) + '% XP' + (me.under ? ', +25% coins' : '') + '<br>' : me.lead > 0 ? 'in the lead: ' + Math.round((xpScale() - 1) * 100) + '% XP<br>' : '') + (me.streak >= 3 ? '🔥 ' + me.streak + ' STREAK' : '');
   const ch = $('chan'); if (me.recallT > 0) { ch.style.display = 'block'; ch.firstElementChild.style.width = (1 - me.recallT / 4) * 100 + '%'; ch.lastElementChild.textContent = 'RECALLING ' + me.recallT.toFixed(1) + 's'; } else if (ch.style.display !== 'none') ch.style.display = 'none';
@@ -1278,7 +1293,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyV' && !me.elim && me.ready) sendHost({ t: 'emote', i: Math.floor(Math.random() * EMOTES.length) });
   if (e.code === 'KeyC') setHero(me.hero + 1);
   if (e.code === 'BracketLeft' || e.code === 'BracketRight') { sens = clamp(sens * (e.code === 'BracketLeft' ? 0.9 : 1.1), 0.2, 4); try { localStorage.setItem('nmh_sens', sens.toFixed(2)); } catch (x) {} toast('mouse sensitivity ' + Math.round(sens * 100) + '%', 1.2); }
-  if (e.code === 'KeyR') reload(); if (e.code === 'KeyQ') ability(); if (e.code === 'KeyG') strike(); if (e.code === 'KeyN') nuke();
+  if (e.code === 'KeyR') reload(); if (e.code === 'KeyQ') ability();
   if (e.code === 'KeyM') { musicOn = !musicOn; musicOn && G.st ? bgm.play().catch(() => {}) : bgm.pause(); toast('music ' + (musicOn ? 'on' : 'off')); }
   if (e.code === 'Enter' && isHost) { if (S.over) { hostReset(); emit({ t: 'reset' }); } else if (!S.started) startMatch(); }
   if (e.code === 'KeyL' && roomCode) { const link = location.origin + location.pathname + '?room=' + roomCode; (navigator.clipboard ? navigator.clipboard.writeText(link) : Promise.reject()).then(() => toast('invite link copied'), () => toast(link, 8)); }
