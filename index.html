@@ -154,7 +154,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 13;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 14;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -733,7 +733,8 @@ function onClientMsg(pid, m) {
   else if (m.t === 'feed') emit({ t: 'feed', m: m.m });
   else if (m.t === 'nuke') { for (const e of S.ents.values()) { if (e.team === tm) continue; if (ET[e.t].struct) damageEnt(e, 500, pid); else if (e.t === 'mam') damageEnt(e, 1500, pid); else damageEnt(e, 99999, pid); } emit({ t: 'nuke', by: pid, team: tm }); }
 }
-function startMatch() { S.started = true; emit({ t: 'start' }); }
+// starting wipes whatever happened in warmup: fresh towers, stashes, camps, pickups and lab, and everyone back at their own base
+function startMatch() { hostReset(); S.started = true; emit({ t: 'start' }); }
 let snapT = 0, lastTick = performance.now();
 function hostLoop() {
   const now = performance.now(), dt = Math.min(0.25, (now - lastTick) / 1000); lastTick = now;
@@ -777,7 +778,7 @@ function teamRing(inst, tm) { const r = new THREE.Mesh(new THREE.RingGeometry(1.
 function applySnap(s) {
   G = s.g; others = s.p || {};
   const seen = new Set();
-  for (const a of s.e) { const id = a[0]; seen.add(id); let v = views.get(id); if (!v) { v = makeView(a); views.set(id, v); } v.tx = a[3]; v.tz = a[4]; v.tyaw = a[5]; v.hp = a[6]; v.mhp = a[7]; v.st = a[8]; v.fl = a[9]; }
+  for (const a of s.e) { const id = a[0]; seen.add(id); let v = views.get(id); if (v && (v.t !== a[1] || v.team !== a[2])) { removeView(v); v = null; } if (!v) { v = makeView(a); views.set(id, v); } v.tx = a[3]; v.tz = a[4]; v.tyaw = a[5]; v.hp = a[6]; v.mhp = a[7]; v.st = a[8]; v.fl = a[9]; }
   for (const [id, v] of views) if (!seen.has(id)) { removeView(v); views.delete(id); }
   const sp = new Set();
   for (const a of s.pk) { sp.add(a[0]); if (!pickViews.has(a[0])) pickViews.set(a[0], makePick(a)); }
@@ -867,7 +868,7 @@ function onEvent(ev) {
       break;
     case 'nuke': $('white').style.opacity = 1; setTimeout(() => $('white').style.transition = 'opacity 2s', 30); setTimeout(() => { $('white').style.opacity = 0; }, 60); setTimeout(() => $('white').style.transition = '', 2200); banner('TACTICAL NUKE', nameOf(ev.by) + ' said gg', true, '#fff'); SFX.boom();
       if (ev.team !== me.team) takeDamage(150, '', ev.by); if (isHost && S) for (const id in S.bots) if (S.bots[id].tm !== ev.team) botDamage(S.bots[id], 150, ev.by, ''); break;
-    case 'start': banner((NT === 2 ? '1v1' : '1v1v1') + ': BUST THEIR STASH', 'then finish them off. last one alive wins.', true); playClip('battle-start'); if (musicOn) bgm.play().catch(() => {}); break;
+    case 'start': resetMe(); banner((NT === 2 ? '1v1' : '1v1v1') + ': BUST THEIR STASH', 'then finish them off. last one alive wins.', true); playClip('battle-start'); if (musicOn) bgm.play().catch(() => {}); break;
     case 'over': { const win = ev.team === me.team, e = $('end'); e.style.display = 'flex'; $('endT').textContent = win ? 'GG EZ' : ev.team < 0 ? 'EVERYBODY LOST' : 'BUSTED'; $('endT').style.color = win ? '#ffe600' : '#ff3b3b';
       const names = Object.values(others).filter(p => p.tm === ev.team).map(p => p.n).join(', ') || 'nobody';
       $('endS').textContent = (ev.team < 0 ? 'Nobody made it. ' : TEAMS[ev.team].n + ' wins: ' + names + '. ') + 'You: ' + me.pk + ' player kills, ' + me.kills + ' creeps, ' + me.deaths + ' deaths, level ' + me.lvl; $('endH').textContent = isHost ? 'press ENTER for a rematch' : 'waiting for the host to run it back'; win ? SFX.horn() : SFX.boom(); document.exitPointerLock && document.exitPointerLock(); break; }
