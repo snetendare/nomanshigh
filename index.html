@@ -135,7 +135,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>RANGE:</b> towers and stashes only take damage from inside their ring, and towers shoot players inside it.<br>
     <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 20 s every 4 minutes (and all through warmup).<br>
     <b>COMEBACK:</b> you level faster the further you are behind the top level (+30% XP per level, plus a slow free trickle), and the leader levels slower. You can shop while dead.<br>
-    <b>AURAS:</b> everyone can see what you are on. Cyan rings = G-Fuel, pink spores = Shrooms, green bubble = Copium, brown ground ring = Brownie, blue drops = Water. Matching pips sit above the name and in the player list.<br>
+    <b>AURAS:</b> everyone can see what you are on: one dot circles your head per active substance, in its slot colour (cyan G-Fuel, pink Shrooms, green Copium, brown Brownie, blue Water). The same dots show in the player list.<br>
     <b>MODES:</b> the host picks 1v1v1 (triangle, a lane between every pair) or 1v1 (two lanes around the lab). Joiners get whatever the host picked.<br>
     Empty colours are played by bots. Desktop + mouse only.
   </div>
@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 18;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 19;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -835,32 +835,24 @@ function updateViews(dt, time) {
   ringWall.visible = G.rg > 0; if (G.rg > 0) ringWall.scale.set(G.rg, 1, G.rg);
 }
 
-// ---------- auras: what everybody can see you are on. Same colours as the substance slots.
-//   G-FUEL X = fast cyan rings round the body     SHROOMS = pink spores circling the head     COPIUM = green bubble
-//   SUS BROWNIE = brown shockwave on the ground   WATER = blue drops rising                   plus one coloured pip per substance above the name
-const AURA_GEO = { ring: new THREE.TorusGeometry(1.15, 0.07, 6, 28), orb: new THREE.SphereGeometry(0.2, 8, 6), bubble: new THREE.SphereGeometry(1.55, 16, 10), ground: new THREE.RingGeometry(1.5, 2.1, 28), drop: new THREE.OctahedronGeometry(0.17), pip: new THREE.SphereGeometry(0.17, 8, 6) };
-const AURA_MAT = DRUGS.map(d => new THREE.MeshBasicMaterial({ color: d.col, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
-const BUBBLE_MAT = new THREE.MeshBasicMaterial({ color: DRUGS[2].col, transparent: true, opacity: 0.2, depthWrite: false });
+// ---------- auras: what everybody can see you are on. One dot per active substance, circling the head,
+// in that substance's slot colour: one effect = one dot, two effects = two dots opposite each other, and so on.
+const AURA_ORB = new THREE.SphereGeometry(0.26, 10, 8);
+const AURA_MAT = DRUGS.map(d => new THREE.MeshBasicMaterial({ color: d.col, transparent: true, opacity: 0.95, depthWrite: false }));
 function fxMask() { let m = 0; for (let k = 0; k < 4; k++) if (me.fx[k] > 0) m |= 1 << k; if (me.regenT > 0) m |= 16; return m; }
 function auraOf(inst, hero) {
   if (inst.aura) return inst.aura;
-  const g = new THREE.Group(), parts = [], pips = [], mh = MODEL_H[HEROES[hero].model]; g.scale.setScalar(1 / inst.base); inst.g.add(g);
-  for (let i = 0; i < 5; i++) { const p = new THREE.Group(); p.visible = false; g.add(p); parts.push(p); const pip = new THREE.Mesh(AURA_GEO.pip, AURA_MAT[i]); pip.visible = false; pip.renderOrder = 21; g.add(pip); pips.push(pip); }
-  for (let i = 0; i < 2; i++) { const r = new THREE.Mesh(AURA_GEO.ring, AURA_MAT[0]); r.rotation.x = Math.PI / 2 + (i ? 0.45 : -0.45); r.position.y = 0.8 + i * 0.6; parts[0].add(r); }
-  for (let i = 0; i < 4; i++) parts[1].add(new THREE.Mesh(AURA_GEO.orb, AURA_MAT[1]));
-  { const b = new THREE.Mesh(AURA_GEO.bubble, BUBBLE_MAT); b.position.y = 1.15; parts[2].add(b); }
-  { const r = new THREE.Mesh(AURA_GEO.ground, AURA_MAT[3]); r.rotation.x = -Math.PI / 2; r.position.y = 0.1; parts[3].add(r); }
-  for (let i = 0; i < 4; i++) parts[4].add(new THREE.Mesh(AURA_GEO.drop, AURA_MAT[4]));
-  return (inst.aura = { g, parts, pips, mh });
+  const g = new THREE.Group(), dots = [], mh = MODEL_H[HEROES[hero].model]; g.scale.setScalar(1 / inst.base); inst.g.add(g);
+  for (let i = 0; i < 5; i++) { const o = new THREE.Mesh(AURA_ORB, AURA_MAT[i]); o.visible = false; g.add(o); dots.push(o); }
+  return (inst.aura = { g, dots, mh });
 }
 function updateAura(a, mask, time, show) {
-  a.g.visible = show && mask > 0; if (!a.g.visible) return; let n = 0;
-  for (let i = 0; i < 5; i++) { const on = !!(mask & (1 << i)); a.parts[i].visible = on; a.pips[i].visible = on; if (on) a.pips[i].position.set(0, a.mh + 1.75 + (n++) * 0.42, 0); }
-  if (mask & 1) a.parts[0].rotation.y = time * 9;
-  if (mask & 2) a.parts[1].children.forEach((o, i) => { const t = time * 2.4 + i * Math.PI / 2; o.position.set(Math.cos(t) * 0.9, a.mh + 0.1 + Math.sin(time * 3 + i) * 0.18, Math.sin(t) * 0.9); });
-  if (mask & 4) { const k = 1 + Math.sin(time * 4) * 0.04; a.parts[2].children[0].scale.set(k, k * 1.15, k); }
-  if (mask & 8) { const k = (time * 1.1) % 1; a.parts[3].children[0].scale.setScalar(0.55 + k * 0.95); }
-  if (mask & 16) a.parts[4].children.forEach((o, i) => { const k = (time * 0.9 + i * 0.25) % 1, t = i * 1.7 + time; o.position.set(Math.cos(t) * 0.75, 0.3 + k * a.mh, Math.sin(t) * 0.75); o.rotation.y = time * 3; });
+  a.g.visible = show && mask > 0; if (!a.g.visible) return;
+  let n = 0, k = 0; for (let i = 0; i < 5; i++) if (mask & (1 << i)) n++;
+  for (let i = 0; i < 5; i++) {
+    const on = !!(mask & (1 << i)); a.dots[i].visible = on; if (!on) continue;
+    const t = time * 2.4 + k * Math.PI * 2 / n; a.dots[i].position.set(Math.cos(t) * 0.95, a.mh + 0.1 + Math.sin(time * 3 + k) * 0.15, Math.sin(t) * 0.95); k++;
+  }
 }
 function fxDots(mask) { let h = ''; for (let i = 0; i < 5; i++) if (mask & (1 << i)) h += '<span title="' + DRUGS[i].name + '" style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:2px;background:' + DRUGS[i].col + '"></span>'; return h ? ' ' + h : ''; }
 
