@@ -115,10 +115,10 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
 <div id="end"><div><h2 id="endT"></h2><p id="endS"></p><p id="endH"></p></div></div>
 <div id="lobby"><div class="box">
   <h1>NO MAN'S HIGH</h1>
-  <div class="sub">PHARMA BELLUM &middot; 1v1v1 free-for-all lane shooter &middot; get geeked, defend your stash, bust theirs</div>
+  <div class="sub">PHARMA BELLUM &middot; 1v1 or 1v1v1 lane shooter &middot; get geeked, defend your stash, bust theirs</div>
   <div class="row"><input id="nm" maxlength="12" placeholder="GAMERTAG" style="width:230px;text-align:center"></div>
   <div id="heroes"></div>
-  <div class="row"><button id="bHost" disabled>HOST GAME</button><input id="code" maxlength="5" placeholder="CODE" style="width:130px;text-align:center;text-transform:uppercase"><button id="bJoin" class="alt" disabled>JOIN</button></div>
+  <div class="row"><button id="bMode" style="background:#ff4fd8;border-color:#ff4fd8">MODE: 1v1v1</button><button id="bHost" disabled>HOST GAME</button><input id="code" maxlength="5" placeholder="CODE" style="width:130px;text-align:center;text-transform:uppercase"><button id="bJoin" class="alt" disabled>JOIN</button></div>
   <div id="lobMsg">loading the goods...</div>
   <div class="help">
     <b>WASD</b> move &middot; <b>SHIFT</b> sprint &middot; <b>SPACE</b> jump<br>
@@ -134,6 +134,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>THE LAB:</b> be the only colour in the middle circle (minions count) to capture it: a batch on capture, then coins for as long as you stand in it.<br>
     <b>RANGE:</b> towers and stashes only take damage from inside their ring, and towers shoot players inside it.<br>
     <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 20 s every 4 minutes (and all through warmup).<br>
+    <b>MODES:</b> the host picks 1v1v1 (triangle, a lane between every pair) or 1v1 (two lanes around the lab). Joiners get whatever the host picked.<br>
     Empty colours are played by bots. Desktop + mouse only.
   </div>
 </div></div>
@@ -153,7 +154,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 12;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 13;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -194,47 +195,64 @@ const NEU = 3, PVP = 0.6, SR = 34, TWP = SR, BASE_R = 24, SUDDEN = 900;
 const HUE = { gob: [0.33, -0.25, 0, 0], arc: [0, 0.4, -0.3, 0], spd: [0, 0, 0, 0], nec: [0, 0, 0, 0], mam: [0, 0.4, -0.3, 0.85] };
 const TEAMS = [{ n: 'BLUE', c: '#3fa7ff', h: 0x3fa7ff }, { n: 'RED', c: '#ff4d4d', h: 0xff4d4d }, { n: 'GREEN', c: '#57e06a', h: 0x57e06a }, { n: 'NARCS', c: '#c9a0ff', h: 0xc9a0ff }];
 const ARENA = 142, BR = 112;
-const BASES = [0, 1, 2].map(i => { const a = Math.PI + i * 2 * Math.PI / 3; return { x: Math.sin(a) * BR, z: Math.cos(a) * BR, a }; });
-const LAB = { x: 0, z: 0, r: 9 };
-// 3 outer camps beyond each lane, 3 inner ones between the lab and the lanes
-const CAMPS = [];
-for (const rad of [100, 37]) for (let i = 0; i < 3; i++) { const a = BASES[i].a + Math.PI; CAMPS.push({ x: Math.sin(a) * rad, z: Math.cos(a) * rad }); }
-// per colour: stash, then for each of its two lanes a tier-2 tower (by the stash) and a tier-1 tower (further out)
-const STRUCTS = [];
-for (let i = 0; i < 3; i++) {
-  STRUCTS.push(['co', i, BASES[i].x, BASES[i].z]);
-  for (let j = 0; j < 3; j++) if (j !== i) {
-    const dx = BASES[j].x - BASES[i].x, dz = BASES[j].z - BASES[i].z, l = hyp(dx, dz), px = -dz / l * 7, pz = dx / l * 7;
-    STRUCTS.push(['t2', i, BASES[i].x + dx / l * 27 + px, BASES[i].z + dz / l * 27 + pz]);
-    STRUCTS.push(['tw', i, BASES[i].x + dx / l * 66 + px, BASES[i].z + dz / l * 66 + pz]);
-  }
-}
-// movement toys: on in warmup, then for 20 s every 4 minutes. k: 0 launch ramp (along dx,dz), 1 bounce pad, 2 speed gate
-const PADS = [];
-{ for (let i = 0; i < 3; i++) {
-    const b = BASES[i], l = hyp(b.x, b.z), cx = -b.x / l, cz = -b.z / l;
-    PADS.push({ k: 0, x: b.x + cx * 30, z: b.z + cz * 30, dx: cx, dz: cz });      // out of each base, toward the lab
-    PADS.push({ k: 2, x: b.x + cx * 52, z: b.z + cz * 52, dx: cx, dz: cz });
-    PADS.push({ k: 0, x: b.x + cx * 74, z: b.z + cz * 74, dx: cx, dz: cz });
-    const c = BASES[(i + 1) % 3], ll = hyp(c.x - b.x, c.z - b.z), ux = (c.x - b.x) / ll, uz = (c.z - b.z) / ll;
-    PADS.push({ k: 0, x: b.x + ux * ll * 0.4, z: b.z + uz * ll * 0.4, dx: ux, dz: uz });      // on each lane, one from either side
-    PADS.push({ k: 0, x: b.x + ux * ll * 0.6, z: b.z + uz * ll * 0.6, dx: -ux, dz: -uz });
-    PADS.push({ k: 2, x: b.x + ux * ll * 0.5 - uz * 5, z: b.z + uz * ll * 0.5 + ux * 5, dx: ux, dz: uz });
-    PADS.push({ k: 1, x: CAMPS[i].x * 0.8, z: CAMPS[i].z * 0.8, dx: 0, dz: 0 });
-  }
-  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.5; PADS.push({ k: 1, x: Math.sin(a) * 23, z: Math.cos(a) * 23, dx: 0, dz: 0 }); }
-}
+// The map is laid out per mode. 3 = 1v1v1: a triangle with a straight lane between every pair.
+// 2 = 1v1: bases opposite each other, two lanes that bow out left and right, the lab between them.
+let NT = 3;
+const BASES = [], LAB = { x: 0, z: 0, r: 9 }, CAMPS = [], LANES = [], STRUCTS = [], PADS = [], OBST = [];
+const teamIds = () => Array.from({ length: NT }, (_, i) => i);
+const lanesOf = t => LANES.filter(L => L.a === t || L.b === t);
+const laneEnd = (L, t) => L.a === t ? L.b : L.a;
+const laneRoute = (L, t) => L.a === t ? L.pts : L.pts.slice().reverse();
 function segDist(px, pz, a, b) { const dx = b.x - a.x, dz = b.z - a.z, t = clamp(((px - a.x) * dx + (pz - a.z) * dz) / (dx * dx + dz * dz), 0, 1); return hyp(px - a.x - dx * t, pz - a.z - dz * t); }
-const OBST = [];
-{ const r = mulberry(420);
+const pathLen = pts => { let s = 0; for (let i = 0; i < pts.length - 1; i++) s += hyp(pts[i + 1].x - pts[i].x, pts[i + 1].z - pts[i].z); return s; };
+// the point d units along a path, and which way the path runs there
+function along(pts, d) {
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], l = hyp(b.x - a.x, b.z - a.z);
+    if (d <= l || i === pts.length - 2) { const k = Math.min(d, l) / l; return { x: a.x + (b.x - a.x) * k, z: a.z + (b.z - a.z) * k, dx: (b.x - a.x) / l, dz: (b.z - a.z) / l }; }
+    d -= l;
+  }
+}
+function setLayout(n) {
+  NT = n === 2 ? 2 : 3;
+  BASES.length = CAMPS.length = LANES.length = STRUCTS.length = PADS.length = OBST.length = 0;
+  for (let i = 0; i < NT; i++) { const a = Math.PI + i * 2 * Math.PI / NT; BASES.push({ x: Math.sin(a) * BR, z: Math.cos(a) * BR, a }); }
+  if (NT === 3) {
+    for (let i = 0; i < 3; i++) LANES.push({ a: i, b: (i + 1) % 3, pts: [BASES[i], BASES[(i + 1) % 3]] });
+    // 3 outer camps beyond each lane, 3 inner ones between the lab and the lanes
+    for (const rad of [100, 37]) for (let i = 0; i < 3; i++) { const a = BASES[i].a + Math.PI; CAMPS.push({ x: Math.sin(a) * rad, z: Math.cos(a) * rad }); }
+  } else {
+    for (const sx of [-1, 1]) LANES.push({ a: 0, b: 1, pts: [BASES[0], { x: sx * 78, z: 0 }, BASES[1]] });
+    for (const x of [-116, 116, -42, 42]) CAMPS.push({ x, z: 0 });
+  }
+  // per colour: stash, then for each of its two lanes a tier-2 tower (by the stash) and a tier-1 tower (further out)
+  for (let i = 0; i < NT; i++) {
+    STRUCTS.push(['co', i, BASES[i].x, BASES[i].z]);
+    for (const L of lanesOf(i)) { const r = laneRoute(L, i), p2 = along(r, 27), p1 = along(r, 66); STRUCTS.push(['t2', i, p2.x - p2.dz * 7, p2.z + p2.dx * 7]); STRUCTS.push(['tw', i, p1.x - p1.dz * 7, p1.z + p1.dx * 7]); }
+  }
+  // movement toys: on in warmup, then for 20 s every 4 minutes. k: 0 launch ramp (along dx,dz), 1 bounce pad, 2 speed gate
+  for (let i = 0; i < NT; i++) {
+    const b = BASES[i], l = hyp(b.x, b.z), cx = -b.x / l, cz = -b.z / l;      // out of each base, toward the lab
+    PADS.push({ k: 0, x: b.x + cx * 30, z: b.z + cz * 30, dx: cx, dz: cz }, { k: 2, x: b.x + cx * 52, z: b.z + cz * 52, dx: cx, dz: cz }, { k: 0, x: b.x + cx * 74, z: b.z + cz * 74, dx: cx, dz: cz });
+  }
+  for (const L of LANES) {                                                   // on each lane: a ramp from either end, a gate in the middle
+    const len = pathLen(L.pts), rv = L.pts.slice().reverse(); let p = along(L.pts, len * 0.4); PADS.push({ k: 0, x: p.x, z: p.z, dx: p.dx, dz: p.dz });
+    p = along(rv, len * 0.4); PADS.push({ k: 0, x: p.x, z: p.z, dx: p.dx, dz: p.dz });
+    p = along(L.pts, len * 0.5); PADS.push({ k: 2, x: p.x - p.dz * 5, z: p.z + p.dx * 5, dx: p.dx, dz: p.dz });
+  }
+  for (let i = 0; i < (NT === 3 ? 3 : 2); i++) PADS.push({ k: 1, x: CAMPS[i].x * 0.8, z: CAMPS[i].z * 0.8, dx: 0, dz: 0 });
+  for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3 + 0.5; PADS.push({ k: 1, x: Math.sin(a) * 23, z: Math.cos(a) * 23, dx: 0, dz: 0 }); }
+  const r = mulberry(420);
   for (let i = 0; i < 1600 && OBST.length < 92; i++) {
     const a = r() * Math.PI * 2, d = Math.sqrt(r()) * (ARENA - 8), x = Math.sin(a) * d, z = Math.cos(a) * d, rad = 1.3 + r() * 2.2, h = 3 + r() * 5, k = Math.floor(r() * 3);
     if (d < 18 || BASES.some(b => hyp(b.x - x, b.z - z) < BASE_R + 6) || CAMPS.some(c => hyp(c.x - x, c.z - z) < 9)) continue;
-    if (segDist(x, z, BASES[0], BASES[1]) < 12 || segDist(x, z, BASES[1], BASES[2]) < 12 || segDist(x, z, BASES[2], BASES[0]) < 12) continue;
+    if (LANES.some(L => L.pts.some((p, j) => j < L.pts.length - 1 && segDist(x, z, p, L.pts[j + 1]) < 12))) continue;
     if (BASES.some(b => segDist(x, z, b, LAB) < 6)) continue;            // keep the run from each base to the lab clear
     if (PADS.some(p => hyp(p.x - x, p.z - z) < rad + 5) || OBST.some(o => hyp(o.x - x, o.z - z) < o.r + rad + 3.5)) continue;
     OBST.push({ x, z, r: rad, h, k });
-  } }
+  }
+}
+setLayout(3);
 // o.y (if given) lets a flying player pass over anything lower than them
 function pushOut(o, r, structs) {
   for (const b of OBST) { if (o.y > b.h) continue; const dx = o.x - b.x, dz = o.z - b.z, d = hyp(dx, dz), m = r + b.r; if (d < m && d > 1e-4) { o.x = b.x + dx / d * m; o.z = b.z + dz / d * m; } }
@@ -368,7 +386,7 @@ function buildWorld() {
   const r = mulberry(7); for (let i = 0; i < 11000; i++) { x.fillStyle = pick(['#447d4d', '#559660', '#3f7447', '#5c9c62']); x.fillRect(r() * 1024, r() * 1024, 3 + r() * 6, 3 + r() * 6); }
   const m = v => (v + GS / 2) / GS * 1024, u = v => v / GS * 1024;
   x.lineCap = x.lineJoin = 'round'; x.strokeStyle = '#d2c193'; x.lineWidth = u(18);
-  x.beginPath(); x.moveTo(m(BASES[0].x), m(BASES[0].z)); x.lineTo(m(BASES[1].x), m(BASES[1].z)); x.lineTo(m(BASES[2].x), m(BASES[2].z)); x.closePath(); x.stroke();
+  for (const L of LANES) { x.beginPath(); L.pts.forEach((p, i) => i ? x.lineTo(m(p.x), m(p.z)) : x.moveTo(m(p.x), m(p.z))); x.stroke(); }
   x.strokeStyle = 'rgba(210,193,147,.45)'; x.lineWidth = u(7); BASES.forEach(b => { x.beginPath(); x.moveTo(m(b.x), m(b.z)); x.lineTo(m(0), m(0)); x.stroke(); });
   BASES.forEach((b, i) => { x.fillStyle = TEAMS[i].c; x.globalAlpha = 0.55; x.beginPath(); x.arc(m(b.x), m(b.z), u(BASE_R), 0, 7); x.fill(); x.globalAlpha = 1; });
   x.fillStyle = 'rgba(255,230,0,.3)'; x.beginPath(); x.arc(m(0), m(0), u(15), 0, 7); x.fill();
@@ -446,6 +464,7 @@ let S = null;                        // host sim state
 let G = { t: 0, st: 0, ov: 0, lp: 0, lt: -1, lo: -1, sd: 0, rm: 0, rn: 240, rg: 0 }; let others = {};
 const padsOn = () => !G.st || G.rm > 0;   // the movement toys: always on in warmup
 const views = new Map(), pickViews = new Map(), pviews = new Map();
+let worldBuilt = false;   // the host builds the map for its chosen mode; a joiner waits to be told the mode
 const me = { id: 'host', team: 0, ready: false, name: 'PLAYER', hero: 0, x: 0, y: 0, z: -90, vy: 0, yaw: 0, pitch: 0, face: 0, hp: 100, mhp: 100, shield: 0, ammo: 0, reloadT: 0, fireT: 0, shotT: 0, qT: 0, eT: 0, dashT: 0, dashX: 0, dashZ: 0,
   down: 0, downKind: '', willElim: false, elim: false, safeT: 0, lastBy: '', lastByT: 0, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], fxMax: [1, 1, 1, 1, 1], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0,
   strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0, kx: 0, kz: 0, padT: 0, boostT: 0,
@@ -461,11 +480,11 @@ function genCode() { const a = 'ABCDEFGHJKLMNPQRSTUVWXYZ'; let s = ''; for (let 
 function openHostPeer() {
   roomCode = roomCode || genCode();
   try { peer = new Peer(PFX + roomCode); } catch (e) { netMsg('Offline: solo only'); return; }
-  peer.on('open', () => { const link = location.origin + location.pathname + '?room=' + roomCode; netMsg('ROOM <b style="font-size:22px;color:#fff">' + roomCode + '</b> &middot; ' + link + ' &middot; press <b style="color:#fff">L</b> to copy the invite link &middot; build ' + BUILD); });
+  peer.on('open', () => { const link = location.origin + location.pathname + '?room=' + roomCode; netMsg('ROOM <b style="font-size:22px;color:#fff">' + roomCode + '</b> &middot; ' + link + ' &middot; press <b style="color:#fff">L</b> to copy the invite link &middot; ' + (NT === 2 ? '1v1' : '1v1v1') + ' &middot; build ' + BUILD); });
   peer.on('connection', c => {
     c.on('open', () => {
-      const cnt = [0, 0, 0]; for (const k in S.teamOf) if (!isBot(k)) cnt[S.teamOf[k]]++;
-      const tm = cnt.indexOf(Math.min(...cnt)); S.teamOf[c.peer] = tm; conns.set(c.peer, c); ensureBots(); c.send({ t: 'hello', team: tm, b: BUILD });
+      const cnt = Array(NT).fill(0); for (const k in S.teamOf) if (!isBot(k)) cnt[S.teamOf[k]]++;
+      const tm = cnt.indexOf(Math.min(...cnt)); S.teamOf[c.peer] = tm; conns.set(c.peer, c); ensureBots(); c.send({ t: 'hello', team: tm, b: BUILD, mode: NT });
     });
     c.on('data', m => onClientMsg(c.peer, m));
     c.on('close', () => { const p = S.players[c.peer]; if (p) emit({ t: 'feed', m: p.n + ' rage quit' }); conns.delete(c.peer); delete S.players[c.peer]; delete S.teamOf[c.peer]; ensureBots(); });
@@ -489,7 +508,7 @@ function joinPeer(code) {
 function hostReset() {
   const players = {}, teamOf = { host: 0 };
   if (S) for (const k in S.teamOf) if (!isBot(k)) { teamOf[k] = S.teamOf[k]; if (S.players[k]) players[k] = S.players[k]; }
-  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: [true, true, true], rampT: 240, rampOn: 0, ring: 0,
+  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: Array(NT).fill(true), rampT: 240, rampOn: 0, ring: 0,
     lab: { p: 0, tm: -1, own: -1, sp: 0, payT: 0, bcd: 0 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, bots: {}, st: [] };
   for (const [t, team, x, z] of STRUCTS) S.st.push(spawn(t, team, x, z));
   S.camps.forEach((c, i) => spawnCamp(i));
@@ -501,10 +520,15 @@ function spawn(t, team, x, z, o = {}) {
 }
 function spawnCamp(i) { const c = S.camps[i]; c.alive = 3; for (let k = 0; k < 3; k++) spawn('spd', NEU, c.x + rnd(-3, 3), c.z + rnd(-3, 3), { camp: i, hx: c.x, hz: c.z, leash: 17, hpk: 1.4 }); }
 const coreOf = t => S.st[t * 5];
-function aliveEnemies(t) { return [0, 1, 2].filter(j => j !== t && coreOf(j).hp > 0); }
+function aliveEnemies(t) { return teamIds().filter(j => j !== t && coreOf(j).hp > 0); }
 function teamAlive(t) { if (coreOf(t).hp > 0) return true; for (const id in S.players) if ((S.teamOf[id] ?? 0) === t && S.players[id].st !== 5) return true; return false; }
 // goal: a rival colour (0-2) or 3 = hold the lab
-function spawnLane(team, goal, t, o = {}) { const b = BASES[team], g = goal === 3 ? LAB : BASES[goal], dx = g.x - b.x, dz = g.z - b.z, l = hyp(dx, dz); return spawn(t, team, b.x + dx / l * 13 + rnd(-3, 3), b.z + dz / l * 13 + rnd(-3, 3), { goal, ox: rnd(-4, 4), ...o }); }
+function spawnLane(team, goal, t, o = {}, L) {   // L: which lane to take (picked at random if the two colours share more than one)
+  const b = BASES[team]; let via = null, g = LAB;
+  if (goal !== 3) { L = L || pick(lanesOf(team).filter(q => laneEnd(q, team) === goal)); const r = L ? laneRoute(L, team) : [b, BASES[goal]]; via = r.slice(1, -1); g = r[1]; }
+  const dx = g.x - b.x, dz = g.z - b.z, l = hyp(dx, dz), e = spawn(t, team, b.x + dx / l * 13 + rnd(-3, 3), b.z + dz / l * 13 + rnd(-3, 3), { goal, ox: rnd(-4, 4), ...o });
+  e.via = via && via.length ? via : null; return e;
+}
 function spawnHunter(x, z, k) { const a = rnd(6.28), o = { x: x + Math.sin(a) * 30, z: z + Math.cos(a) * 30 }; pushOut(o, 1.5); spawn('spd', NEU, o.x, o.z, { hunt: 1, hpk: k }); }
 function dropPick(x, z, k) { const o = { x: x + rnd(-1.5, 1.5), z: z + rnd(-1.5, 1.5) }; pushOut(o, 1); const p = { id: S.nid++, k: k ?? Math.floor(Math.random() * DRUGS.length), x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); if (S.picks.size > 40) S.picks.delete(S.picks.keys().next().value); }
 function damageEnt(e, dmg, by, hs) { if (e.inv || e.hp <= 0) return; e.hp -= dmg; if (by) { e.last = by; e.lastHs = hs ? 1 : 0; } }
@@ -531,7 +555,7 @@ function onEntDeath(e) {
 // ---------- bot heroes: any colour without a human gets one
 const BOTN = ['BOT KAREN', 'BOT CHAD', 'BOT KEVIN'];
 function ensureBots() {
-  for (let t = 0; t < 3; t++) {
+  for (let t = 0; t < NT; t++) {
     const id = 'bot' + t; let humans = 0; for (const k in S.teamOf) if (!isBot(k) && S.teamOf[k] === t) humans++;
     if (!humans && !S.bots[id]) { const hero = Math.floor(Math.random() * 3), H = HEROES[hero], sp = spawnPos(t); S.bots[id] = { id, tm: t, hero, x: sp.x, z: sp.z, yaw: sp.yaw, hp: H.hp, mhp: H.hp, lvl: 1, lvlT: 0, down: 0, out: false, st: 0, fireT: 1, retreat: false, goal: -1, strafe: 1, strafeT: 0, k: 0, pk: 0, d: 0, buyT: 40 }; S.teamOf[id] = t; pubBot(S.bots[id]); }
     else if (humans && S.bots[id]) { delete S.bots[id]; delete S.players[id]; delete S.teamOf[id]; }
@@ -549,14 +573,14 @@ function botDamage(b, d, by, et) {
 function botTick(b, dt, arr, plist, structs) {
   if (b.out) return;
   const H = HEROES[b.hero], g = H.gun, core = coreOf(b.tm), base = BASES[b.tm];
-  if (b.down > 0) { if ((b.down -= dt) <= 0) { if (core.hp > 0) { const sp = spawnPos(b.tm); b.x = sp.x; b.z = sp.z; b.yaw = sp.yaw; b.hp = b.mhp; b.retreat = false; } else b.out = true; } return; }
+  if (b.down > 0) { if ((b.down -= dt) <= 0) { if (core.hp > 0) { const sp = spawnPos(b.tm); b.x = sp.x; b.z = sp.z; b.yaw = sp.yaw; b.hp = b.mhp; b.retreat = false; b.goal = -1; } else b.out = true; } return; }
   if (!S.started) { b.st = 0; return; }
   if ((b.lvlT += dt) > 50) { b.lvlT = 0; botLevel(b); }
   if ((b.buyT -= dt) <= 0) { b.buyT = 45; const en = aliveEnemies(b.tm); if (en.length && core.hp > 0 && S.ents.size < 100) for (let i = 0; i < 2; i++) spawnLane(b.tm, pick(en), 'gob', { hpk: 1 + S.time / 420 }); }
   const dBase = hyp(b.x - base.x, b.z - base.z);
   b.hp = Math.min(b.mhp, b.hp + (core.hp > 0 && dBase < BASE_R ? 30 : 3) * dt);
   if (S.ring && hyp(b.x, b.z) > S.ring) botDamage(b, 22 * dt, '', '');
-  if (b.hp < b.mhp * 0.3) b.retreat = true; if (b.hp > b.mhp * 0.85) b.retreat = false;
+  if (b.hp < b.mhp * 0.3) b.retreat = true; if (b.retreat && b.hp > b.mhp * 0.85) { b.retreat = false; b.goal = -1; }
   const range = g.range ? g.range - 3 : 30;
   let tgt = null, tp = null, bs = 1e9;
   for (const p of plist) { if (p.tm === b.tm || p.gh) continue; const d = hyp(p.x - b.x, p.z - b.z); if (d < 42 && d - 8 < bs) { bs = d - 8; tgt = p; tp = p; } }
@@ -587,8 +611,9 @@ function botTick(b, dt, arr, plist, structs) {
       }
     }
   } else {
-    if (b.goal < 0 || b.goal === b.tm || coreOf(b.goal).hp <= 0) { const en = aliveEnemies(b.tm); b.goal = en.length ? pick(en) : -1; }
-    const gx = b.goal >= 0 ? BASES[b.goal].x : 0, gz = b.goal >= 0 ? BASES[b.goal].z : 0, d = hyp(gx - b.x, gz - b.z);
+    if (b.goal < 0 || b.goal === b.tm || coreOf(b.goal).hp <= 0) { const en = aliveEnemies(b.tm); b.goal = en.length ? pick(en) : -1; const q = b.goal >= 0 ? pick(lanesOf(b.tm).filter(x => laneEnd(x, b.tm) === b.goal)) : null; b.via = q ? laneRoute(q, b.tm).slice(1, -1) : []; }
+    const wp = b.via && b.via.length ? b.via[0] : null, gx = wp ? wp.x : b.goal >= 0 ? BASES[b.goal].x : 0, gz = wp ? wp.z : b.goal >= 0 ? BASES[b.goal].z : 0, d = hyp(gx - b.x, gz - b.z);
+    if (wp && d < 10) b.via.shift();
     if (hold) { const hd = hyp(hold.x - b.x, hold.z - b.z) || 1; if (hd < SR + 3) { mx = (b.x - hold.x) / hd; mz = (b.z - hold.z) / hd; } b.yaw = Math.atan2(hold.x - b.x, hold.z - b.z); }
     else if (d > 6) { mx = (gx - b.x) / d; mz = (gz - b.z) / d; b.yaw = Math.atan2(mx, mz); }
   }
@@ -606,9 +631,9 @@ function hostTick(dt) {
     S.time += dt;
     if ((S.waveT -= dt) <= 0) {
       S.waveT = 22; S.wave++;
-      if (S.ents.size < 100) for (let t = 0; t < 3; t++) {
+      if (S.ents.size < 100) for (let t = 0; t < NT; t++) {
         if (coreOf(t).hp <= 0) continue;
-        for (const j of aliveEnemies(t)) { const n = 2 + (S.time > 240 ? 1 : 0); for (let i = 0; i < n; i++) spawnLane(t, j, 'gob', { hpk: tk }); if ((S.wave + t + j) % 2 === 0) spawnLane(t, j, 'arc', { hpk: tk }); }
+        lanesOf(t).forEach((q, li) => { const j = laneEnd(q, t); if (coreOf(j).hp <= 0) return; const n = 2 + (S.time > 240 ? 1 : 0); for (let i = 0; i < n; i++) spawnLane(t, j, 'gob', { hpk: tk }, q); if ((S.wave + t + j + li) % 2 === 0) spawnLane(t, j, 'arc', { hpk: tk }, q); });
       }
     }
     if ((S.huntT -= dt) <= 0) { S.huntT = 45; if (S.ents.size < 105) for (const p of plist) spawnHunter(p.x, p.z, tk); emit({ t: 'toast', m: 'snitch spiders are hunting everyone' }); }
@@ -616,17 +641,17 @@ function hostTick(dt) {
     if (!S.boss && (S.bossT -= dt) <= 0) { S.boss = 1; spawn('mam', NEU, 0, 14, { hx: 0, hz: 0, leash: 30, hpk: tk }); emit({ t: 'ann', m: 'THE DEA-PHANT', s: 'a pink elephant guards THE LAB. kill it and it fights for you.', c: '#ff7ad9', horn: 1 }); }
     if ((S.careT -= dt) <= 0) { S.careT = 60; const a = rnd(6.28), d = rnd(14, 48), o = { x: Math.sin(a) * d, z: Math.cos(a) * d }; pushOut(o, 2); const p = { id: S.nid++, k: 9, x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); emit({ t: 'ann', m: 'CARE PACKAGE INBOUND', s: 'near the middle. first come first served.', c: '#19e3ff' }); }
     if (!S.sudden && S.time > SUDDEN) { S.sudden = true; emit({ t: 'ann', m: 'SUDDEN DEATH', s: 'every stash is on fire.', c: '#ff3b3b', horn: 1 }); }
-    if (S.sudden) for (let t = 0; t < 3; t++) { const c = coreOf(t); if (c.hp > 0) c.hp -= 25 * dt; }
+    if (S.sudden) for (let t = 0; t < NT; t++) { const c = coreOf(t); if (c.hp > 0) c.hp -= 25 * dt; }
     if (S.rampOn > 0) { if ((S.rampOn -= dt) <= 0) { S.rampOn = 0; emit({ t: 'toast', m: 'ramps offline. back in 4 minutes.' }); } }
     else if ((S.rampT -= dt) <= 0) { S.rampT = 220; S.rampOn = 20; emit({ t: 'ann', m: 'RAMPS ONLINE', s: '20 seconds of launch ramps, bounce pads and speed gates. send it.', c: '#ff8a1e', horn: 1 }); }
     // closing ring: once no stash is left, the play area shrinks onto the lab
-    if (!S.ring && [0, 1, 2].every(t => coreOf(t).hp <= 0)) { S.ring = ARENA; emit({ t: 'ann', m: 'THE RING IS CLOSING', s: 'no stashes left. get to the middle or burn.', c: '#ff3b3b', horn: 1 }); }
+    if (!S.ring && teamIds().every(t => coreOf(t).hp <= 0)) { S.ring = ARENA; emit({ t: 'ann', m: 'THE RING IS CLOSING', s: 'no stashes left. get to the middle or burn.', c: '#ff3b3b', horn: 1 }); }
     if (S.ring) S.ring = Math.max(16, S.ring - 2.6 * dt);
     // the lab: whoever is alone in the circle (players count double, minions count too) captures it, then gets paid for standing in it
-    const L = S.lab, w = [0, 0, 0]; L.bcd -= dt;
+    const L = S.lab, w = Array(NT).fill(0); L.bcd -= dt;
     for (const p of plist) if (hyp(p.x - LAB.x, p.z - LAB.z) < LAB.r) w[p.tm] += 2;
     for (const e of S.ents.values()) if (e.team !== NEU && !ET[e.t].struct && e.hp > 0 && hyp(e.x - LAB.x, e.z - LAB.z) < LAB.r) w[e.team] += 1;
-    const tin = [0, 1, 2].filter(t => w[t] > 0);
+    const tin = teamIds().filter(t => w[t] > 0);
     if (tin.length === 1) {
       const tm = tin[0];
       if (L.own === tm) { L.p = 100; if ((L.payT -= dt) <= 0) { L.payT = 1; emit({ t: 'coin', team: tm, c: 4 }); } }
@@ -636,7 +661,7 @@ function hostTick(dt) {
         if ((L.sp -= dt) <= 0) { L.sp = 10; if (S.ents.size < 105) spawnHunter(LAB.x, LAB.z, tk); }
         if (L.p >= 100) {
           L.own = tm; L.p = 100; const batch = L.bcd <= 0;
-          if (batch) { L.bcd = 60; for (const j of aliveEnemies(tm)) spawnLane(tm, j, 'gob', { big: 1, hpk: 4, dk: 3 }); }
+          if (batch) { L.bcd = 60; for (const q of lanesOf(tm)) { const j = laneEnd(q, tm); if (coreOf(j).hp > 0) spawnLane(tm, j, 'gob', { big: 1, hpk: 4, dk: 3 }, q); } }
           emit({ t: 'batch', team: tm, b: batch ? 1 : 0 });
         }
       }
@@ -644,7 +669,7 @@ function hostTick(dt) {
   }
   S.camps.forEach((c, i) => { if (c.alive <= 0 && c.resp > 0 && (c.resp -= dt) <= 0) spawnCamp(i); });
   // shields: a T2 is covered by its lane's T1; the stash by both of its T2s
-  for (let t = 0; t < 3; t++) { const b = t * 5; S.st[b + 1].inv = S.st[b + 2].hp > 0 ? 1 : 0; S.st[b + 3].inv = S.st[b + 4].hp > 0 ? 1 : 0; S.st[b].inv = (S.st[b + 1].hp > 0 && S.st[b + 3].hp > 0 && !S.sudden) ? 1 : 0; }
+  for (let t = 0; t < NT; t++) { const b = t * 5; S.st[b + 1].inv = S.st[b + 2].hp > 0 ? 1 : 0; S.st[b + 3].inv = S.st[b + 4].hp > 0 ? 1 : 0; S.st[b].inv = (S.st[b + 1].hp > 0 && S.st[b + 3].hp > 0 && !S.sudden) ? 1 : 0; }
   const arr = [...S.ents.values()], structs = arr.filter(e => ET[e.t].struct && e.hp > 0).map(e => ({ x: e.x, z: e.z, r: ET[e.t].r }));
   for (const id in S.bots) { const b = S.bots[id]; botTick(b, dt, arr, plist, structs); pubBot(b); }
   for (const e of arr) {
@@ -669,8 +694,9 @@ function hostTick(dt) {
       if (e.leash) { const dx = e.hx - e.x, dz = e.hz - e.z, dd = hyp(dx, dz); if (dd > 3.5) { e.x += dx / dd * d.spd * dt; e.z += dz / dd * d.spd * dt; e.yaw = Math.atan2(dx, dz); e.st = 1; } else e.st = 0; }
       else if (e.hunt) e.st = 0;
       else {
-        if (e.goal !== 3 && (e.goal < 0 || coreOf(e.goal).hp <= 0)) { const en = aliveEnemies(e.team); e.goal = en.length ? en[0] : 3; }
-        const g = e.goal === 3 ? LAB : BASES[e.goal], k = e.goal === 3 ? 0.5 : 1, dx = g.x + e.ox * k - e.x, dz = g.z + e.ox * 0.6 * k - e.z, dd = hyp(dx, dz) || 1;
+        if (e.goal !== 3 && (e.goal < 0 || coreOf(e.goal).hp <= 0)) { const en = aliveEnemies(e.team); e.goal = en.length ? en[0] : 3; e.via = null; }
+        const vp = e.goal !== 3 && e.via ? e.via[0] : null, g = vp || (e.goal === 3 ? LAB : BASES[e.goal]), k = e.goal === 3 ? 0.5 : 1, dx = g.x + e.ox * k - e.x, dz = g.z + e.ox * 0.6 * k - e.z, dd = hyp(dx, dz) || 1;
+        if (vp && dd < 10) { e.via.shift(); if (!e.via.length) e.via = null; }
         if (e.goal === 3 && dd < 2.5) e.st = 0; else { e.x += dx / dd * d.spd * dt; e.z += dz / dd * d.spd * dt; e.yaw = Math.atan2(dx, dz); e.st = 1; }
       }
     }
@@ -679,8 +705,8 @@ function hostTick(dt) {
   for (let i = 0; i < arr.length; i++) { const a = arr[i]; if (ET[a.t].struct || a.hp <= 0) continue; for (let j = i + 1; j < arr.length; j++) { const b = arr[j]; if (ET[b.t].struct || b.hp <= 0) continue; const dx = b.x - a.x, dz = b.z - a.z, d = hyp(dx, dz), m = (ET[a.t].r + ET[b.t].r) * 0.85; if (d < m && d > 1e-3) { const k = (m - d) / d * 0.5; a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k; } } }
   for (const e of arr) if (e.hp <= 0 && S.ents.has(e.id)) { S.ents.delete(e.id); onEntDeath(e); }
   if (S.started && !S.over) {
-    const alive = [0, 1, 2].filter(teamAlive);
-    for (let t = 0; t < 3; t++) if (S.wasAlive[t] && !alive.includes(t)) { S.wasAlive[t] = false; if (alive.length > 1) emit({ t: 'out', team: t }); }
+    const alive = teamIds().filter(teamAlive);
+    for (let t = 0; t < NT; t++) if (S.wasAlive[t] && !alive.includes(t)) { S.wasAlive[t] = false; if (alive.length > 1) emit({ t: 'out', team: t }); }
     if (alive.length <= 1) { S.over = 1; emit({ t: 'over', team: alive.length ? alive[0] : -1 }); }
   }
 }
@@ -691,7 +717,7 @@ function makeSnap() {
 }
 function onClientMsg(pid, m) {
   if (!S) return; const tm = S.teamOf[pid] ?? 0;
-  if (m.t === 'hi') { const c = conns.get(pid); if (c && S.teamOf[pid] !== undefined) try { c.send({ t: 'hello', team: tm, b: BUILD }); } catch (e) {} return; }
+  if (m.t === 'hi') { const c = conns.get(pid); if (c && S.teamOf[pid] !== undefined) try { c.send({ t: 'hello', team: tm, b: BUILD, mode: NT }); } catch (e) {} return; }
   if (m.t === 'p') { m.s.tm = tm; S.players[pid] = m.s; }
   else if (m.t === 'hit') { for (const [id, d, hs] of m.h) { const e = S.ents.get(id), pl = S.players[pid]; if (!e || e.team === tm) continue; if (ET[e.t].struct && (!pl || hyp(pl.x - e.x, pl.z - e.z) > SR + 4)) continue; damageEnt(e, Math.min(d, 5000), pid, hs); } }
   else if (m.t === 'phit') { if (S.teamOf[m.to] !== undefined && S.teamOf[m.to] !== tm) emit({ t: 'hurt', to: m.to, d: Math.min(m.d, 2000), by: pid, hs: m.hs, kb: m.kb }); }
@@ -818,7 +844,7 @@ function showEmote(pid, i) {
 }
 function onEvent(ev) {
   switch (ev.t) {
-    case 'hello': if (me.ready && me.team === ev.team) break; me.team = ev.team; me.ready = true; resetMe(); banner('YOU ARE ' + TEAMS[me.team].n, 'defend your stash. bust theirs.', false, TEAMS[me.team].c);
+    case 'hello': if (me.ready && me.team === ev.team) break; if (!worldBuilt) { setLayout(ev.mode); buildWorld(); worldBuilt = true; } me.team = ev.team; me.ready = true; resetMe(); banner('YOU ARE ' + TEAMS[me.team].n, 'defend your stash. bust theirs.', false, TEAMS[me.team].c);
       if (ev.b !== BUILD) setTimeout(() => { banner('VERSION MISMATCH', 'you: build ' + BUILD + ', host: build ' + (ev.b || 'old') + '. everyone press Ctrl+F5.', false, '#ff3b3b'); netMsg('<b style="color:#ff3b3b">VERSION MISMATCH</b>: you are on build ' + BUILD + ', the host on ' + (ev.b || 'an older one') + '. Everyone press Ctrl+F5.'); }, 2500); break;
     case 'hurt': if (ev.to === me.id) takeDamage(ev.d, ev.et, ev.by, ev.kb); else if (isHost && S && S.bots[ev.to]) botDamage(S.bots[ev.to], ev.d, ev.by, ev.et); break;
     case 'shot': tracer(new THREE.Vector3(...ev.a), new THREE.Vector3(...ev.b), TEAMCOL[ev.c], 0.12, 0.16); break;
@@ -841,7 +867,7 @@ function onEvent(ev) {
       break;
     case 'nuke': $('white').style.opacity = 1; setTimeout(() => $('white').style.transition = 'opacity 2s', 30); setTimeout(() => { $('white').style.opacity = 0; }, 60); setTimeout(() => $('white').style.transition = '', 2200); banner('TACTICAL NUKE', nameOf(ev.by) + ' said gg', true, '#fff'); SFX.boom();
       if (ev.team !== me.team) takeDamage(150, '', ev.by); if (isHost && S) for (const id in S.bots) if (S.bots[id].tm !== ev.team) botDamage(S.bots[id], 150, ev.by, ''); break;
-    case 'start': banner('1v1v1: BUST THEIR STASH', 'then finish them off. last one alive wins.', true); playClip('battle-start'); if (musicOn) bgm.play().catch(() => {}); break;
+    case 'start': banner((NT === 2 ? '1v1' : '1v1v1') + ': BUST THEIR STASH', 'then finish them off. last one alive wins.', true); playClip('battle-start'); if (musicOn) bgm.play().catch(() => {}); break;
     case 'over': { const win = ev.team === me.team, e = $('end'); e.style.display = 'flex'; $('endT').textContent = win ? 'GG EZ' : ev.team < 0 ? 'EVERYBODY LOST' : 'BUSTED'; $('endT').style.color = win ? '#ffe600' : '#ff3b3b';
       const names = Object.values(others).filter(p => p.tm === ev.team).map(p => p.n).join(', ') || 'nobody';
       $('endS').textContent = (ev.team < 0 ? 'Nobody made it. ' : TEAMS[ev.team].n + ' wins: ' + names + '. ') + 'You: ' + me.pk + ' player kills, ' + me.kills + ' creeps, ' + me.deaths + ' deaths, level ' + me.lvl; $('endH').textContent = isHost ? 'press ENTER for a rematch' : 'waiting for the host to run it back'; win ? SFX.horn() : SFX.boom(); document.exitPointerLock && document.exitPointerLock(); break; }
@@ -1011,7 +1037,7 @@ function strike() { if (me.strike <= 0 || me.down > 0 || me.elim) return; me.str
 function nuke() { if (me.nuke <= 0 || me.down > 0 || me.elim) return; me.nuke--; sendHost({ t: 'nuke' }); }
 function recall() { if (me.down > 0 || me.elim || G.ov || me.recallT > 0) return; if (!myCoreAlive()) { toast('no stash to recall to'); return; } if (inBase()) { toast('already home'); return; } me.recallT = 4; toast('recalling: hold still for 4 seconds', 1.5); }
 // ---------- shop (only inside your base ring). keys: 1-4 minions, 5-9 substances, Tab = where minions go
-function shopTargets() { const a = []; for (let t = 0; t < 3; t++) if (t !== me.team && coreHp(t) > 0) a.push({ g: t, n: TEAMS[t].n, c: TEAMS[t].c }); a.push({ g: 3, n: 'THE LAB', c: '#ffe600' }); return a; }
+function shopTargets() { const a = []; for (let t = 0; t < NT; t++) if (t !== me.team && coreHp(t) > 0) a.push({ g: t, n: TEAMS[t].n, c: TEAMS[t].c }); a.push({ g: 3, n: 'THE LAB', c: '#ffe600' }); return a; }
 function toggleShop() { if (me.shop) { me.shop = false; return; } if (me.down > 0 || me.elim) return; if (!inBase()) { toast(myCoreAlive() ? 'the shop is at your stash: go home or press B to recall' : 'your stash is gone. no more shopping.', 2); return; } me.shop = true; }
 function buy(i) {
   if (!me.shop) return;
@@ -1172,7 +1198,7 @@ function updateHud(time) {
   renderShop();
   const t = Math.floor(G.t), cores = [0, 0, 0]; for (const v of views.values()) if (v.t === 'co') cores[v.team] = v.hp / v.mhp;
   let top = '<b id="clock" style="font-size:22px;min-width:70px;text-align:center;color:' + (G.sd || G.rg ? '#ff3b3b' : '#fff') + '">' + (G.st ? Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0') : 'WARMUP') + '</b>';
-  for (let tm = 0; tm < 3; tm++) { const ps = Object.values(others).filter(p => p.tm === tm), names = ps.map(p => (p.fed ? '\u{1F451}' : '') + p.n + ' L' + (p.l || 1)).join(', ') || 'EMPTY', dead = cores[tm] <= 0, last = dead && ps.some(p => p.st !== 5); top += `<div class="tm" style="${tm === me.team ? 'outline:2px solid #fff;' : ''}${dead && !last ? 'opacity:.35;' : ''}"><span style="color:${TEAMS[tm].c}">${names}${last ? ' · LAST LIFE' : dead ? ' · OUT' : ''}</span><div class="cbar"><i style="background:${TEAMS[tm].c};width:${cores[tm] * 100}%"></i></div></div>`; }
+  for (let tm = 0; tm < NT; tm++) { const ps = Object.values(others).filter(p => p.tm === tm), names = ps.map(p => (p.fed ? '\u{1F451}' : '') + p.n + ' L' + (p.l || 1)).join(', ') || 'EMPTY', dead = cores[tm] <= 0, last = dead && ps.some(p => p.st !== 5); top += `<div class="tm" style="${tm === me.team ? 'outline:2px solid #fff;' : ''}${dead && !last ? 'opacity:.35;' : ''}"><span style="color:${TEAMS[tm].c}">${names}${last ? ' · LAST LIFE' : dead ? ' · OUT' : ''}</span><div class="cbar"><i style="background:${TEAMS[tm].c};width:${cores[tm] * 100}%"></i></div></div>`; }
   $('top').innerHTML = top;
   const rampTxt = !G.st ? ' &middot; ramps are on in warmup' : G.rg > 0 ? ' &middot; <b style="color:#ff3b3b">RING CLOSING</b>' : G.rm > 0 ? ' &middot; <b style="color:#ff8a1e">RAMPS ONLINE ' + Math.ceil(G.rm) + 's</b>' : ' &middot; ramps in ' + Math.floor(G.rn / 60) + ':' + String(G.rn % 60).padStart(2, '0');
   const labTxt = G.lo >= 0 ? 'THE LAB: held by <b style="color:' + TEAMS[G.lo].c + '">' + TEAMS[G.lo].n + '</b>' + (G.lt >= 0 && G.lt !== G.lo ? ', <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> taking it ' + Math.floor(G.lp) + '%' : G.lo === me.team ? ' (stand in it for coins)' : '') : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> capturing ' + Math.floor(G.lp) + '%' : 'THE LAB (middle): be alone in the circle to capture it';
@@ -1184,7 +1210,7 @@ function updateHud(time) {
   // minimap: turned so your own stash is at the bottom
   const W = 180, dl = Math.PI - BASES[me.team].a, cs = Math.cos(dl), sn = Math.sin(dl);
   const mx = (x, z) => (ARENA - (x * cs + z * sn)) / (2 * ARENA) * W, mz = (x, z) => (ARENA - (z * cs - x * sn)) / (2 * ARENA) * W;
-  mctx.clearRect(0, 0, W, W); mctx.strokeStyle = 'rgba(210,193,147,.5)'; mctx.lineWidth = 6; mctx.beginPath(); BASES.forEach((b, i) => i ? mctx.lineTo(mx(b.x, b.z), mz(b.x, b.z)) : mctx.moveTo(mx(b.x, b.z), mz(b.x, b.z))); mctx.closePath(); mctx.stroke();
+  mctx.clearRect(0, 0, W, W); mctx.strokeStyle = 'rgba(210,193,147,.5)'; mctx.lineWidth = 6; for (const L of LANES) { mctx.beginPath(); L.pts.forEach((p, i) => i ? mctx.lineTo(mx(p.x, p.z), mz(p.x, p.z)) : mctx.moveTo(mx(p.x, p.z), mz(p.x, p.z))); mctx.stroke(); }
   mctx.lineWidth = 2; mctx.strokeStyle = G.lo >= 0 ? TEAMS[G.lo].c : G.lt >= 0 ? TEAMS[G.lt].c : '#ffe600'; mctx.beginPath(); mctx.arc(mx(0, 0), mz(0, 0), 6, 0, 7); mctx.stroke();
   if (G.rg > 0) { mctx.strokeStyle = '#ff3b3b'; mctx.beginPath(); mctx.arc(mx(0, 0), mz(0, 0), G.rg / (2 * ARENA) * W, 0, 7); mctx.stroke(); }
   for (const v of views.values()) { mctx.fillStyle = TEAMS[v.team].c; const s = v.struct ? (v.t === 'co' ? 9 : v.t === 't2' ? 6 : 5) : v.t === 'mam' ? 6 : 3; mctx.fillRect(mx(v.x, v.z) - s / 2, mz(v.x, v.z) - s / 2, s, s); }
@@ -1242,7 +1268,7 @@ addEventListener('mousemove', e => {
 });
 
 // ============================== lobby
-let selHero = +(Q.get('hero') || 0), loaded = false;
+let selHero = +(Q.get('hero') || 0), loaded = false, selMode = Q.get('mode') === '2' ? 2 : 3;
 $('heroes').innerHTML = HEROES.map((h, i) => `<div class="hero" data-i="${i}"><h3>${h.name}</h3><p>${h.desc}<br>${h.hp} HP &middot; ${h.gun.name}</p></div>`).join('');
 function selH(i) { selHero = i; document.querySelectorAll('.hero').forEach((e, j) => e.classList.toggle('sel', j === i)); }
 document.querySelectorAll('.hero').forEach(e => e.onclick = () => selH(+e.dataset.i)); selH(selHero);
@@ -1255,7 +1281,8 @@ function start(asHost) {
   me.hero = selHero; const code = $('code').value.trim().toUpperCase();
   if (!asHost && code.length < 4) { $('lobMsg').textContent = 'enter the 4-letter room code'; return; }
   $('lobby').style.display = 'none'; $('hud').style.display = 'block';
-  buildWorld(); buildHud(); me.inst = makeInst(HEROES[me.hero].model); scene.add(me.inst.g); resetMe();
+  if (asHost) { setLayout(selMode); buildWorld(); worldBuilt = true; }
+  buildHud(); me.inst = makeInst(HEROES[me.hero].model); scene.add(me.inst.g); resetMe();
   if (asHost) { isHost = true; me.id = 'host'; me.team = 0; me.ready = true; roomCode = (Q.get('host') || '').toUpperCase(); hostReset(); setInterval(hostLoop, 33); openHostPeer(); if (Q.get('go') === '1') setTimeout(startMatch, 500); }
   else joinPeer(code);
   running = true; last = performance.now(); requestAnimationFrame(frame);
@@ -1263,6 +1290,8 @@ function start(asHost) {
   window.DBG = { me, views, pviews, keys, setHero, PADS, hud: updateHud, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
     step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { const time = performance.now() / 1000 + i * dt; updateMe(dt, time); updateViews(dt, time); updateFx(dt); updateCam(dt, time); } renderer.render(scene, camera); }, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
 }
+$('bMode').onclick = () => { selMode = selMode === 3 ? 2 : 3; $('bMode').textContent = 'MODE: ' + (selMode === 2 ? '1v1' : '1v1v1'); };
+$('bMode').textContent = 'MODE: ' + (selMode === 2 ? '1v1' : '1v1v1');
 $('bHost').onclick = () => start(true); $('bJoin').onclick = () => start(false);
 loadAssets().then(() => { loaded = true; $('bHost').disabled = $('bJoin').disabled = false; $('lobMsg').textContent = Q.get('room') ? 'room ' + $('code').value + ' is loaded in. pick a hero and hit JOIN.' : 'host a room and send your two rivals the link. or practice against bots.'; if (Q.get('host')) start(true); else if (AUTO && Q.get('room')) start(false); })
   .catch(e => { console.error(e); $('lobMsg').textContent = 'asset load failed: ' + e.message; });
