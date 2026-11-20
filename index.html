@@ -156,16 +156,18 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 20;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 21;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
   { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; your next shot within 3 s is a wide laser that pierces and crits everything in its path). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
-  { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto spray n pray, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
-    gun: { name: 'SPRAY N PRAY', dmg: 10, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50 }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
+  { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto fire bolts that take a moment to arrive, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
+    gun: { name: 'SPRAY N PRAY', dmg: 10, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50, proj: { spd: 110, r: 0.2, size: 0.22 } }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
   { id: 'brute', name: 'THE BOUNCER', model: 'brute', hp: 220, spd: 8.3, col: 0xd0a070, desc: 'Tanky boomstick enjoyer. Close range only: pellets vanish past 20 m. <b>Q: Ground Pound</b> (slam around you). <b>E: Bull Charge</b> (rush that damages and shoves).',
     gun: { name: 'BOOMSTICK', dmg: 11, rate: 0.72, mag: 6, reload: 1.9, spread: 0.055, pellets: 9, hs: 1.4, auto: false, zoom: 55, range: 20 }, q: { name: 'GROUND POUND', cd: 9 }, e: { name: 'BULL CHARGE', cd: 18 } },
+  { id: 'warper', name: 'THE WARPER', model: 'warper', hp: 130, spd: 9.3, col: 0xb98cff, desc: 'Slow, heavy orbs: easy to land up close, dodgeable at range. <b>Q: Blink</b> (teleport 22 m where you aim). <b>E: Rift</b> (a portal pair for 8 s: you step through either way, your minions march from the first to the second).',
+    gun: { name: 'VOID ORBS', dmg: 40, rate: 0.5, mag: 8, reload: 1.7, spread: 0, pellets: 1, hs: 1.5, auto: true, zoom: 55, proj: { spd: 48, r: 0.9, size: 0.6 } }, q: { name: 'BLINK', cd: 10 }, e: { name: 'RIFT', cd: 30 } },
 ];
 const DRUGS = [
   { id: 'zoom', name: 'G-FUEL X', tag: 'ZOOMIES', sub: '+70% speed, +40% fire rate', col: '#19e3ff', dur: 10, dose: 28, cost: 60 },
@@ -297,7 +299,7 @@ addEventListener('resize', resize); resize();
 
 // ============================== NML models
 const TPL = {}; let M3 = null;
-const MODEL_H = { sniper: 2.2, firemage: 2.2, brute: 2.6, goblin: 1.5, skeletonarcher: 1.9, spider: 1.1, mammoth: 5.5, necromancer: 2.9, wisp: 1.6, sunpriest: 3.4 };
+const MODEL_H = { sniper: 2.2, firemage: 2.2, brute: 2.6, goblin: 1.5, skeletonarcher: 1.9, spider: 1.1, mammoth: 5.5, necromancer: 2.9, wisp: 1.6, sunpriest: 3.4, warper: 2.3 };
 const BAKEMAT = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
 const XRAYMAT = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide, depthTest: false, transparent: true, opacity: 0.9 });
 function bake(name, gltf) {
@@ -512,7 +514,7 @@ function hostReset() {
   const players = {}, teamOf = { host: 0 };
   if (S) for (const k in S.teamOf) if (!isBot(k)) { teamOf[k] = S.teamOf[k]; if (S.players[k]) players[k] = S.players[k]; }
   S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: Array(NT).fill(true), rampT: 240, rampOn: 0, ring: 0,
-    lab: { p: 0, tm: -1, own: -1, sp: 0, payT: 0, bcd: 0 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, bots: {}, st: [] };
+    rifts: [], lab: { p: 0, tm: -1, own: -1, sp: 0, payT: 0, bcd: 0 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, bots: {}, st: [] };
   for (const [t, team, x, z] of STRUCTS) S.st.push(spawn(t, team, x, z));
   S.camps.forEach((c, i) => spawnCamp(i));
   ensureBots();
@@ -560,7 +562,7 @@ const BOTN = ['BOT KAREN', 'BOT CHAD', 'BOT KEVIN'];
 function ensureBots() {
   for (let t = 0; t < NT; t++) {
     const id = 'bot' + t; let humans = 0; for (const k in S.teamOf) if (!isBot(k) && S.teamOf[k] === t) humans++;
-    if (!humans && !S.bots[id]) { const hero = Math.floor(Math.random() * 3), H = HEROES[hero], sp = spawnPos(t); S.bots[id] = { id, tm: t, hero, x: sp.x, z: sp.z, yaw: sp.yaw, hp: H.hp, mhp: H.hp, lvl: 1, lvlT: 0, down: 0, out: false, st: 0, fireT: 1, retreat: false, goal: -1, strafe: 1, strafeT: 0, k: 0, pk: 0, d: 0, buyT: 40 }; S.teamOf[id] = t; pubBot(S.bots[id]); }
+    if (!humans && !S.bots[id]) { const hero = Math.floor(Math.random() * HEROES.length), H = HEROES[hero], sp = spawnPos(t); S.bots[id] = { id, tm: t, hero, x: sp.x, z: sp.z, yaw: sp.yaw, hp: H.hp, mhp: H.hp, lvl: 1, lvlT: 0, down: 0, out: false, st: 0, fireT: 1, retreat: false, goal: -1, strafe: 1, strafeT: 0, k: 0, pk: 0, d: 0, buyT: 40 }; S.teamOf[id] = t; pubBot(S.bots[id]); }
     else if (humans && S.bots[id]) { delete S.bots[id]; delete S.players[id]; delete S.teamOf[id]; }
   }
 }
@@ -670,6 +672,7 @@ function hostTick(dt) {
       }
     } else if (tin.length === 0 && L.own !== L.tm) { L.p = Math.max(0, L.p - dt * 2); if (L.p === 0) L.tm = -1; }
   }
+  for (let i = S.rifts.length - 1; i >= 0; i--) if ((S.rifts[i].t -= dt) <= 0) S.rifts.splice(i, 1);
   S.camps.forEach((c, i) => { if (c.alive <= 0 && c.resp > 0 && (c.resp -= dt) <= 0) spawnCamp(i); });
   // shields: a T2 is covered by its lane's T1; the stash by both of its T2s
   for (let t = 0; t < NT; t++) { const b = t * 5; S.st[b + 1].inv = S.st[b + 2].hp > 0 ? 1 : 0; S.st[b + 3].inv = S.st[b + 4].hp > 0 ? 1 : 0; S.st[b].inv = (S.st[b + 1].hp > 0 && S.st[b + 3].hp > 0 && !S.sudden) ? 1 : 0; }
@@ -704,6 +707,7 @@ function hostTick(dt) {
       }
     }
     if (!d.struct) pushOut(e, d.r * sc * 0.8, structs);
+    if (!d.struct && !neu && S.rifts.length) { e.rcd = (e.rcd || 0) - dt; if (e.rcd <= 0) for (const R of S.rifts) if (R.team === e.team && hyp(e.x - R.a[0], e.z - R.a[1]) < 3.4) { e.x = R.b[0] + rnd(-2, 2); e.z = R.b[1] + rnd(-2, 2); e.via = null; e.rcd = 4; break; } }
   }
   for (let i = 0; i < arr.length; i++) { const a = arr[i]; if (ET[a.t].struct || a.hp <= 0) continue; for (let j = i + 1; j < arr.length; j++) { const b = arr[j]; if (ET[b.t].struct || b.hp <= 0) continue; const dx = b.x - a.x, dz = b.z - a.z, d = hyp(dx, dz), m = (ET[a.t].r + ET[b.t].r) * 0.85; if (d < m && d > 1e-3) { const k = (m - d) / d * 0.5; a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k; } } }
   for (const e of arr) if (e.hp <= 0 && S.ents.has(e.id)) { S.ents.delete(e.id); onEntDeath(e); }
@@ -735,6 +739,8 @@ function onClientMsg(pid, m) {
   else if (m.t === 'fx') emit({ ...m, by: pid });
   else if (m.t === 'feed') emit({ t: 'feed', m: m.m });
   else if (m.t === 'beam') emit({ t: 'beam', a: m.a, b: m.b, by: pid });
+  else if (m.t === 'pj') emit({ t: 'pj', o: m.o, d: m.d, h: m.h, by: pid, tm });
+  else if (m.t === 'rift') { if (S.rifts.length < 6) { S.rifts.push({ team: tm, a: m.a, b: m.b, t: 8 }); emit({ t: 'rift', team: tm, a: m.a, b: m.b, dur: 8, by: pid }); } }
 }
 // starting wipes whatever happened in warmup: fresh towers, stashes, camps, pickups and lab, and everyone back at their own base
 function startMatch() { hostReset(); S.started = true; emit({ t: 'start' }); }
@@ -833,6 +839,50 @@ function updateViews(dt, time) {
   if (labWisp) labWisp.g.position.y = 2.4 + Math.sin(time * 2) * 0.4;
   const lc = G.lo >= 0 ? TEAMCOL[G.lo] : G.lt >= 0 ? TEAMCOL[G.lt] : 0xffe600; labRing.material.color.setHex(lc); labFill.material.color.setHex(lc); labFill.material.opacity = G.lo >= 0 ? 0.45 : 0.12 + 0.4 * G.lp / 100;
   ringWall.visible = G.rg > 0; if (G.rg > 0) ringWall.scale.set(G.rg, 1, G.rg);
+  updateProjs(dt); updateRifts(dt, time);
+}
+
+// ---------- projectiles (fire mage bolts, warper orbs): they take time to arrive. Only the shooter's own copy deals
+// damage; everyone else gets a harmless copy to see and dodge.
+const projs = [], PROJ_GEO = new THREE.SphereGeometry(1, 10, 8), projMats = {};
+const projMat = c => projMats[c] || (projMats[c] = new THREE.MeshBasicMaterial({ color: c }));
+function spawnProj(o, d, P, col, dmg, hsMult, mine, team) {
+  if (projs.length > 110) return; const m = new THREE.Mesh(PROJ_GEO, projMat(col)); m.scale.setScalar(P.size); m.position.set(o.x, o.y, o.z); scene.add(m);
+  projs.push({ m, x: o.x, y: o.y, z: o.z, dx: d.x, dy: d.y, dz: d.z, spd: P.spd, r: P.r, life: 4, dmg, hsMult, mine, team, col });
+}
+const _po = new THREE.Vector3(), _pd = new THREE.Vector3();
+function updateProjs(dt) {
+  for (let i = projs.length - 1; i >= 0; i--) {
+    const p = projs[i], step = p.spd * dt; _po.set(p.x, p.y, p.z); _pd.set(p.dx, p.dy, p.dz);
+    const res = rayHit(_po, _pd, 0, step, p.r, p.team); p.life -= dt;
+    // someone else's shot reaching me: it stops here on my screen (their copy is the one that hurts)
+    const onMe = !p.mine && p.team !== me.team && me.down <= 0 && hyp(p.x - me.x, p.z - me.z) < 0.9 * me.scale + p.r && p.y < me.y + 2.4 * me.scale && p.y > me.y;
+    if (res.hit || onMe || p.life <= 0) {
+      if (res.hit && p.mine && res.v && !(res.v.fl & 1)) hitEnt(res.v, p.dmg * (res.hs ? p.hsMult : 1), res.hs, res.p);
+      if (res.hit || onMe) poof(onMe ? p.x : res.p.x, onMe ? p.y : res.p.y, onMe ? p.z : res.p.z, p.col, 3, 0.16);
+      scene.remove(p.m); projs.splice(i, 1); continue;
+    }
+    p.x += p.dx * step; p.y += p.dy * step; p.z += p.dz * step; p.m.position.set(p.x, p.y, p.z);
+  }
+}
+// ---------- rifts (warper E): a portal pair. The owner's colour only: the player goes either way, minions go from the first to the second.
+const rifts = [];
+function addRift(ev) {
+  const mk = (p, q) => {
+    const g = new THREE.Group(); g.position.set(p[0], 2.5, p[1]); g.rotation.y = Math.atan2(q[0] - p[0], q[1] - p[1]);
+    g.add(new THREE.Mesh(new THREE.TorusGeometry(2.3, 0.3, 8, 30), new THREE.MeshBasicMaterial({ color: TEAMCOL[ev.team] })),
+          new THREE.Mesh(new THREE.CircleGeometry(2.1, 24), new THREE.MeshBasicMaterial({ color: 0xb98cff, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false })));
+    scene.add(g); return g;
+  };
+  rifts.push({ team: ev.team, a: ev.a, b: ev.b, t: ev.dur, ga: mk(ev.a, ev.b), gb: mk(ev.b, ev.a) });
+  fxBoom(ev.a[0], 2, ev.a[1], 4, 0xb98cff, 0.4); fxBoom(ev.b[0], 2, ev.b[1], 4, 0xb98cff, 0.4); tone(300, 0.5, 'sine', 0.15, 900);
+}
+function updateRifts(dt, time) {
+  for (let i = rifts.length - 1; i >= 0; i--) {
+    const R = rifts[i]; R.t -= dt; R.ga.children[0].rotation.z = time * 3; R.gb.children[0].rotation.z = -time * 3;
+    const k = R.t < 1 ? Math.max(0.05, R.t) : 1; R.ga.scale.setScalar(k); R.gb.scale.setScalar(k);
+    if (R.t <= 0) { scene.remove(R.ga); scene.remove(R.gb); rifts.splice(i, 1); }
+  }
 }
 
 // ---------- auras: what everybody can see you are on. One dot per active substance, circling the head,
@@ -884,6 +934,8 @@ function onEvent(ev) {
     case 'out': feed('<span style="color:' + TEAMS[ev.team].c + '">' + TEAMS[ev.team].n + '</span> is out of the game'); banner(TEAMS[ev.team].n + ' IS OUT', ev.team === me.team ? 'gg go next' : 'one less to worry about', true, TEAMS[ev.team].c); break;
     case 'got': if (ev.to === me.id) gotPick(ev.k); break;
     case 'beam': if (ev.by !== me.id) drawBeam(ev.a, ev.b); break;
+    case 'pj': if (ev.by !== me.id && HEROES[ev.h] && HEROES[ev.h].gun.proj) spawnProj({ x: ev.o[0], y: ev.o[1], z: ev.o[2] }, { x: ev.d[0], y: ev.d[1], z: ev.d[2] }, HEROES[ev.h].gun.proj, HEROES[ev.h].col, 0, 1, false, ev.tm); break;
+    case 'rift': addRift(ev); if (ev.team !== me.team) toast(TEAMS[ev.team].n + ' opened a rift', 1.5); break;
     case 'fx': if (ev.by !== me.id) { fxBoom(ev.x, 1, ev.z, ev.r, ev.c, ev.l || 0.5); SFX.expl(); } break;
     case 'ann': banner(ev.m, ev.s || '', !!ev.horn, ev.c || '#ffe600'); break;
     case 'toast': toast(ev.m); break;
@@ -1018,17 +1070,21 @@ function rayCyl(o, d, cx, cz, r, h) {
   if (y < 0 || y > h) { const y2 = o.y + d.y * tc; if (y2 < 0 || y2 > h) return -1; return tc; }
   return te;
 }
-function castShot(o, d, range) {   // range: how far from the player the shot reaches (none = across the map)
-  const tmin = camLen * 0.85; let bt = range ? camLen + range : 420, bv = null;
-  if (d.y < -1e-4) bt = Math.min(bt, -o.y / d.y);
-  for (const b of OBST) { const t = rayCyl(o, d, b.x, b.z, b.r, b.h); if (t > tmin && t < bt) bt = t; }
-  for (const v of views.values()) { if (v.hp <= 0 || (v.team === me.team && !v.struct)) continue; const t = rayCyl(o, d, v.x, v.z, v.r * (v.struct ? 1 : 1.15), v.h * 1.05); if (t > tmin && t < bt) { bt = t; bv = v.team === me.team ? null : v; } }
-  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 3 || st === 5 || pv.tm === me.team) continue; const sc = pv.s.sc || 1, t = rayCyl(o, d, pv.x, pv.z, 0.85 * sc, pv.y + pv.h * sc * 1.05); if (t > tmin && t < bt) { bt = t; bv = pv; } }
+// What a ray hits between tmin and tmax. pad fattens the targets (for fat projectiles). team: whose shot it is, so that
+// colour's own minions and players are ignored (its buildings still block).
+function rayHit(o, d, tmin, tmax, pad, team) {
+  let bt = tmax, bv = null, hit = false;
+  if (d.y < -1e-4) { const tg = -o.y / d.y; if (tg < bt) { bt = tg; hit = true; } }
+  for (const b of OBST) { const t = rayCyl(o, d, b.x, b.z, b.r, b.h); if (t >= tmin && t < bt) { bt = t; bv = null; hit = true; } }
+  for (const v of views.values()) { if (v.hp <= 0 || (v.team === team && !v.struct)) continue; const t = rayCyl(o, d, v.x, v.z, v.r * (v.struct ? 1 : 1.15) + pad, v.h * 1.05 + pad); if (t >= tmin && t < bt) { bt = t; bv = v.team === team ? null : v; hit = true; } }
+  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 3 || st === 5 || pv.tm === team) continue; const sc = pv.s.sc || 1, t = rayCyl(o, d, pv.x, pv.z, 0.85 * sc + pad, pv.y + pv.h * sc * 1.05 + pad); if (t >= tmin && t < bt) { bt = t; bv = pv; hit = true; } }
   const p = new THREE.Vector3().copy(o).addScaledVector(d, bt); let hs = false;
   if (bv && bv.pid) hs = bv.s.st !== 6 && p.y > bv.y + bv.h * (bv.s.sc || 1) * 0.8;
   else if (bv && !bv.struct) hs = (bv.t === 'gob' || bv.t === 'arc' || bv.t === 'nec') && p.y > bv.h * 0.74;
-  return { p, v: bv, hs, dist: Math.max(0, bt - camLen) };
+  return { p, v: bv, hs, t: bt, hit };
 }
+// the instant shot from the crosshair. range: how far from the player it reaches (none = across the map)
+function castShot(o, d, range) { const r = rayHit(o, d, camLen * 0.85, range ? camLen + range : 420, 0, me.team); r.dist = Math.max(0, r.t - camLen); return r; }
 function muzzle() { return new THREE.Vector3(me.x - Math.cos(me.yaw) * 0.5 * me.scale + Math.sin(me.yaw) * 0.9, me.y + 1.45 * me.scale, me.z + Math.sin(me.yaw) * 0.5 * me.scale + Math.cos(me.yaw) * 0.9); }
 function reload() { const H = HEROES[me.hero]; if (me.reloadT > 0 || me.ammo >= H.gun.mag) return; me.reloadT = H.gun.reload / (fxOn('zoom') ? 1.4 : 1); SFX.reload(); }
 function tryFire() {
@@ -1042,6 +1098,10 @@ function tryFire() {
   for (let i = 0; i < g.pellets; i++) {
     const d = camDir.clone(), sp = g.spread * (me.ads ? 0.45 : 1) + (g.zoom < 30 && !me.ads ? 0.045 : 0);
     d.x += rnd(-sp, sp); d.y += rnd(-sp, sp); d.z += rnd(-sp, sp); d.normalize();
+    if (g.proj) {   // a travelling shot: launched from the gun toward whatever the crosshair is on
+      const dir = castShot(camPos, d).p.sub(mz).normalize(); spawnProj(mz, dir, g.proj, H.col, g.dmg * mult, g.hs, true, me.team);
+      sendHost({ t: 'pj', o: [+mz.x.toFixed(2), +mz.y.toFixed(2), +mz.z.toFixed(2)], d: [+dir.x.toFixed(3), +dir.y.toFixed(3), +dir.z.toFixed(3)], h: me.hero }); continue;
+    }
     const res = castShot(camPos, d, g.range), fall = g.range ? clamp(1 - (res.dist - g.range * 0.4) / (g.range * 0.6) * 0.7, 0.3, 1) : 1; tracer(mz, res.p, H.col, g.pellets > 1 ? 0.05 : g.zoom < 30 ? 0.14 : 0.07, g.zoom < 30 ? 0.3 : 0.09);
     if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (crit && !res.v.struct); hitEnt(res.v, g.dmg * mult * fall * (hs ? g.hs : 1), hs, res.p); }
     else if (res.v) toast(res.v.t === 'co' ? 'shielded: drop one of its T2 towers first' : 'shielded: drop the T1 in front of it first', 1.5);
@@ -1054,6 +1114,11 @@ function ability() {
   const H = HEROES[me.hero]; if (me.qT > 0 || me.down > 0 || me.elim || me.chargeT > 0) return; me.qT = H.q.cd; me.ghT = 0; me.recallT = 0;
   if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); me.critT = 3; toast('dive shot: your next shot is a piercing laser', 1.5); }
   else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 42 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 38 * m, life: 4, tick: 0.5 }); }
+  else if (H.id === 'warper') {   // blink: 22 m where you aim, straight through anything in the way
+    const l = hyp(camDir.x, camDir.z) || 1, o = { x: me.x + camDir.x / l * 22, z: me.z + camDir.z / l * 22 }, st = []; for (const v of views.values()) if (v.struct) st.push(v);
+    pushOut(o, 0.9, st); fxBoom(me.x, 1.3, me.z, 3, 0xb98cff, 0.35); sendHost({ t: 'fx', x: me.x, z: me.z, r: 3, c: 0xb98cff, l: 0.35 });
+    me.x = o.x; me.z = o.z; me.kx = me.kz = 0; fxBoom(me.x, 1.3, me.z, 3.5, 0xb98cff, 0.4); sendHost({ t: 'fx', x: me.x, z: me.z, r: 3.5, c: 0xb98cff, l: 0.4 }); tone(900, 0.25, 'sine', 0.15, 250);
+  }
   else { const m = dmgMult(); boomAt(me.x, me.z, 10, 120 * m, 0xd0a070, 0.5, 14); me.vy = 7; }
 }
 // E: the long-cooldown one
@@ -1061,6 +1126,11 @@ function ability2() {
   const H = HEROES[me.hero]; if (me.eT > 0 || me.down > 0 || me.elim || me.chargeT > 0) { if (me.eT > 0) toast(H.e.name + ' ready in ' + Math.ceil(me.eT) + 's', 0.8); return; } me.eT = H.e.cd; me.recallT = 0;
   if (H.id === 'sniper') { me.ghT = 5; banner('GHILLIE', 'invisible for 5 s. towers and minions lose you. your next shot hits 40% harder. shrooms still see you.', false, '#9dff6a'); SFX.dash(); }
   else if (H.id === 'mage') { const hx = Math.sin(me.yaw), hz = Math.cos(me.yaw); boomAt(me.x, me.z, 8, 68 * dmgMult(), 0xff6a1e, 0.45, 12); me.vy = 21; me.kx = hx * 24; me.kz = hz * 24; me.y = Math.max(me.y, 0.1); me.ground = false; toast('ROCKET JUMP', 1); }
+  else if (H.id === 'warper') {   // rift: one portal where you stand, one where you aim (up to 55 m)
+    const p = castShot(camPos, camDir).p, d = hyp(p.x - me.x, p.z - me.z) || 1, k = Math.min(1, 55 / d), o = { x: me.x + (p.x - me.x) * k, z: me.z + (p.z - me.z) * k }, st = []; for (const v of views.values()) if (v.struct) st.push(v);
+    pushOut(o, 2, st); me.padT = 1.2; sendHost({ t: 'rift', a: [+me.x.toFixed(1), +me.z.toFixed(1)], b: [+o.x.toFixed(1), +o.z.toFixed(1)] });
+    banner('RIFT', 'open for 8 s. you can step through either way; your minions march from here to there.', false, '#b98cff');
+  }
   else { me.chargeT = 0.55; me.chargeX = Math.sin(me.yaw); me.chargeZ = Math.cos(me.yaw); me.chargeHit = new Set(); toast('BULL CHARGE', 1); SFX.dash(); tone(90, 0.5, 'sawtooth', 0.12, 260); }
 }
 // The sniper's dive shot: a fat beam along the ground from where you stand, in the direction you aim. It crits every
@@ -1165,6 +1235,10 @@ function updateMe(dt, time) {
       else { me.boostT = 5; toast('SPEED GATE: gotta go fast', 1.2); SFX.dash(); }
       break;
     }
+  }
+  for (const R of rifts) if (R.team === me.team && me.padT <= 0 && me.down <= 0) {   // stepping through one of your colour's rifts
+    const da = hyp(me.x - R.a[0], me.z - R.a[1]), db = hyp(me.x - R.b[0], me.z - R.b[1]);
+    if (da < 2.6 || db < 2.6) { const to = da < 2.6 ? R.b : R.a; me.x = to[0]; me.z = to[1]; me.kx = me.kz = 0; me.padT = 1.5; toast('through the rift', 0.8); SFX.dash(); break; }
   }
   if (me.shotT > 0 || me.ads) me.face = angLerp(me.face, me.yaw, Math.min(1, dt * 20));
   if (keys.Space && me.ground && me.down <= 0 && me.chargeT <= 0) { me.vy = 9; me.ground = false; }
@@ -1334,7 +1408,7 @@ function start(asHost) {
   else joinPeer(code);
   running = true; last = performance.now(); requestAnimationFrame(frame);
   if (!AUTO) lockPtr();
-  window.DBG = { me, views, pviews, keys, setHero, PADS, hud: updateHud, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
+  window.DBG = { me, views, pviews, keys, setHero, PADS, hud: updateHud, projs, rifts, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
     step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { const time = performance.now() / 1000 + i * dt; updateMe(dt, time); updateViews(dt, time); updateFx(dt); updateCam(dt, time); } renderer.render(scene, camera); }, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
 }
 $('bMode').onclick = () => { selMode = selMode === 3 ? 2 : 3; $('bMode').textContent = 'MODE: ' + (selMode === 2 ? '1v1' : '1v1v1'); };
