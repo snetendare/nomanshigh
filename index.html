@@ -155,14 +155,14 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 15;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 16;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
   { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
-  { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 9.1, col: 0xff7a3d, desc: 'Full-auto spray n pray, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
-    gun: { name: 'SPRAY N PRAY', dmg: 12, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50 }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
+  { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto spray n pray, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
+    gun: { name: 'SPRAY N PRAY', dmg: 10, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50 }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
   { id: 'brute', name: 'THE BOUNCER', model: 'brute', hp: 220, spd: 8.3, col: 0xd0a070, desc: 'Tanky boomstick enjoyer. Close range only: pellets vanish past 20 m. <b>Q: Ground Pound</b> (slam around you). <b>E: Bull Charge</b> (rush that damages and shoves).',
     gun: { name: 'BOOMSTICK', dmg: 11, rate: 0.72, mag: 6, reload: 1.9, spread: 0.055, pellets: 9, hs: 1.4, auto: false, zoom: 55, range: 20 }, q: { name: 'GROUND POUND', cd: 9 }, e: { name: 'BULL CHARGE', cd: 18 } },
 ];
@@ -1055,14 +1055,14 @@ const zones = [], pending = [];
 function ability() {
   const H = HEROES[me.hero]; if (me.qT > 0 || me.down > 0 || me.elim || me.chargeT > 0) return; me.qT = H.q.cd; me.ghT = 0; me.recallT = 0;
   if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); }
-  else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 50 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 45 * m, life: 4, tick: 0.5 }); }
+  else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 42 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 38 * m, life: 4, tick: 0.5 }); }
   else { const m = dmgMult(); boomAt(me.x, me.z, 10, 120 * m, 0xd0a070, 0.5, 14); me.vy = 7; }
 }
 // E: the long-cooldown one
 function ability2() {
   const H = HEROES[me.hero]; if (me.eT > 0 || me.down > 0 || me.elim || me.chargeT > 0) { if (me.eT > 0) toast(H.e.name + ' ready in ' + Math.ceil(me.eT) + 's', 0.8); return; } me.eT = H.e.cd; me.recallT = 0;
   if (H.id === 'sniper') { me.ghT = 5; banner('GHILLIE', 'invisible for 5 s. towers and minions lose you. your next shot hits 40% harder. shrooms still see you.', false, '#9dff6a'); SFX.dash(); }
-  else if (H.id === 'mage') { const hx = Math.sin(me.yaw), hz = Math.cos(me.yaw); boomAt(me.x, me.z, 8, 80 * dmgMult(), 0xff6a1e, 0.45, 12); me.vy = 21; me.kx = hx * 24; me.kz = hz * 24; me.y = Math.max(me.y, 0.1); me.ground = false; toast('ROCKET JUMP', 1); }
+  else if (H.id === 'mage') { const hx = Math.sin(me.yaw), hz = Math.cos(me.yaw); boomAt(me.x, me.z, 8, 68 * dmgMult(), 0xff6a1e, 0.45, 12); me.vy = 21; me.kx = hx * 24; me.kz = hz * 24; me.y = Math.max(me.y, 0.1); me.ground = false; toast('ROCKET JUMP', 1); }
   else { me.chargeT = 0.55; me.chargeX = Math.sin(me.yaw); me.chargeZ = Math.cos(me.yaw); me.chargeHit = new Set(); toast('BULL CHARGE', 1); SFX.dash(); tone(90, 0.5, 'sawtooth', 0.12, 260); }
 }
 function strike() { if (me.strike <= 0 || me.down > 0 || me.elim) return; me.strike--; const res = castShot(camPos, camDir); banner('CHEMTRAIL STRIKE', 'the government is doing this', true, '#19e3ff'); for (let i = -2; i <= 2; i++) pending.push({ x: res.p.x + Math.sin(me.yaw) * i * 7, z: res.p.z + Math.cos(me.yaw) * i * 7, r: 11, dmg: 320 * dmgMult(), t: 1.1 + (i + 2) * 0.18, c: 0x19e3ff }); }
