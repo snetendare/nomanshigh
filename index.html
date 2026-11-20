@@ -134,6 +134,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>THE LAB:</b> be the only colour in the middle circle (minions count) to capture it: a batch on capture, then coins for as long as you stand in it.<br>
     <b>RANGE:</b> towers and stashes only take damage from inside their ring, and towers shoot players inside it.<br>
     <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 20 s every 4 minutes (and all through warmup).<br>
+    <b>AURAS:</b> everyone can see what you are on. Cyan rings = G-Fuel, pink spores = Shrooms, green bubble = Copium, brown ground ring = Brownie, blue drops = Water. Matching pips sit above the name and in the player list.<br>
     <b>MODES:</b> the host picks 1v1v1 (triangle, a lane between every pair) or 1v1 (two lanes around the lab). Joiners get whatever the host picked.<br>
     Empty colours are played by bots. Desktop + mouse only.
   </div>
@@ -154,7 +155,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 14;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 15;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -561,7 +562,7 @@ function ensureBots() {
     else if (humans && S.bots[id]) { delete S.bots[id]; delete S.players[id]; delete S.teamOf[id]; }
   }
 }
-function pubBot(b) { S.players[b.id] = { n: BOTN[b.tm], h: b.hero, tm: b.tm, x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2), yw: +b.yaw.toFixed(2), st: b.out ? 5 : b.down > 0 ? 3 : b.st, hp: Math.ceil(b.hp), mhp: b.mhp, sc: 1, hi: 0, k: b.k, pk: b.pk, d: b.d, l: b.lvl, gh: 0, bot: 1 }; }
+function pubBot(b) { S.players[b.id] = { n: BOTN[b.tm], h: b.hero, tm: b.tm, x: +b.x.toFixed(2), y: 0, z: +b.z.toFixed(2), yw: +b.yaw.toFixed(2), st: b.out ? 5 : b.down > 0 ? 3 : b.st, hp: Math.ceil(b.hp), mhp: b.mhp, sc: 1, hi: 0, k: b.k, pk: b.pk, d: b.d, l: b.lvl, gh: 0, fx: 0, bot: 1 }; }
 function botLevel(b) { b.lvl++; b.mhp += 12; b.hp += 12; }
 function botDamage(b, d, by, et) {
   if (b.down > 0 || b.out || !S.started || S.over) return;
@@ -822,6 +823,7 @@ function updateViews(dt, time) {
     g.position.set(pv.x, pv.y, pv.z); g.rotation.set(lying ? -Math.PI / 2 : 0, pv.yaw, 0, 'YXZ'); g.scale.setScalar(pv.inst.base * (p.sc || 1));
     if (pv.inst.sm) pv.inst.sm.material = shroom && foe ? XRAYMAT : p.gh ? GHOSTMAT : BAKEMAT;
     setBar(pv.bar, Math.max(0, p.hp) / (p.mhp || 1), TEAMCOL[pv.tm]); pv.bar.visible = p.st !== 3;
+    updateAura(auraOf(pv.inst, pv.hero), p.fx || 0, time, p.st !== 3 && p.st !== 5);
     pv.inst.play(p.st === 2 ? 'Attack' : p.st === 1 ? 'Walk' : p.st === 4 ? 'Aim' : 'Idle'); pv.inst.mixer.update(dt);
   }
   { const on = padsOn(); for (const pv of padViews) { pv.mat.color.setHex(on ? PADCOL[pv.p.k] : 0x444444); pv.mat.opacity = on ? 0.72 + 0.22 * Math.sin(time * 8 + pv.p.x) : 0.28; if (pv.p.k === 2) pv.g.children[0].rotation.z = on ? time * 2 : 0; for (const e of pv.ex) e.visible = on; } }
@@ -830,6 +832,35 @@ function updateViews(dt, time) {
   const lc = G.lo >= 0 ? TEAMCOL[G.lo] : G.lt >= 0 ? TEAMCOL[G.lt] : 0xffe600; labRing.material.color.setHex(lc); labFill.material.color.setHex(lc); labFill.material.opacity = G.lo >= 0 ? 0.45 : 0.12 + 0.4 * G.lp / 100;
   ringWall.visible = G.rg > 0; if (G.rg > 0) ringWall.scale.set(G.rg, 1, G.rg);
 }
+
+// ---------- auras: what everybody can see you are on. Same colours as the substance slots.
+//   G-FUEL X = fast cyan rings round the body     SHROOMS = pink spores circling the head     COPIUM = green bubble
+//   SUS BROWNIE = brown shockwave on the ground   WATER = blue drops rising                   plus one coloured pip per substance above the name
+const AURA_GEO = { ring: new THREE.TorusGeometry(1.15, 0.07, 6, 28), orb: new THREE.SphereGeometry(0.2, 8, 6), bubble: new THREE.SphereGeometry(1.55, 16, 10), ground: new THREE.RingGeometry(1.5, 2.1, 28), drop: new THREE.OctahedronGeometry(0.17), pip: new THREE.SphereGeometry(0.17, 8, 6) };
+const AURA_MAT = DRUGS.map(d => new THREE.MeshBasicMaterial({ color: d.col, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }));
+const BUBBLE_MAT = new THREE.MeshBasicMaterial({ color: DRUGS[2].col, transparent: true, opacity: 0.2, depthWrite: false });
+function fxMask() { let m = 0; for (let k = 0; k < 4; k++) if (me.fx[k] > 0) m |= 1 << k; if (me.regenT > 0) m |= 16; return m; }
+function auraOf(inst, hero) {
+  if (inst.aura) return inst.aura;
+  const g = new THREE.Group(), parts = [], pips = [], mh = MODEL_H[HEROES[hero].model]; g.scale.setScalar(1 / inst.base); inst.g.add(g);
+  for (let i = 0; i < 5; i++) { const p = new THREE.Group(); p.visible = false; g.add(p); parts.push(p); const pip = new THREE.Mesh(AURA_GEO.pip, AURA_MAT[i]); pip.visible = false; pip.renderOrder = 21; g.add(pip); pips.push(pip); }
+  for (let i = 0; i < 2; i++) { const r = new THREE.Mesh(AURA_GEO.ring, AURA_MAT[0]); r.rotation.x = Math.PI / 2 + (i ? 0.45 : -0.45); r.position.y = 0.8 + i * 0.6; parts[0].add(r); }
+  for (let i = 0; i < 4; i++) parts[1].add(new THREE.Mesh(AURA_GEO.orb, AURA_MAT[1]));
+  { const b = new THREE.Mesh(AURA_GEO.bubble, BUBBLE_MAT); b.position.y = 1.15; parts[2].add(b); }
+  { const r = new THREE.Mesh(AURA_GEO.ground, AURA_MAT[3]); r.rotation.x = -Math.PI / 2; r.position.y = 0.1; parts[3].add(r); }
+  for (let i = 0; i < 4; i++) parts[4].add(new THREE.Mesh(AURA_GEO.drop, AURA_MAT[4]));
+  return (inst.aura = { g, parts, pips, mh });
+}
+function updateAura(a, mask, time, show) {
+  a.g.visible = show && mask > 0; if (!a.g.visible) return; let n = 0;
+  for (let i = 0; i < 5; i++) { const on = !!(mask & (1 << i)); a.parts[i].visible = on; a.pips[i].visible = on; if (on) a.pips[i].position.set(0, a.mh + 1.75 + (n++) * 0.42, 0); }
+  if (mask & 1) a.parts[0].rotation.y = time * 9;
+  if (mask & 2) a.parts[1].children.forEach((o, i) => { const t = time * 2.4 + i * Math.PI / 2; o.position.set(Math.cos(t) * 0.9, a.mh + 0.1 + Math.sin(time * 3 + i) * 0.18, Math.sin(t) * 0.9); });
+  if (mask & 4) { const k = 1 + Math.sin(time * 4) * 0.04; a.parts[2].children[0].scale.set(k, k * 1.15, k); }
+  if (mask & 8) { const k = (time * 1.1) % 1; a.parts[3].children[0].scale.setScalar(0.55 + k * 0.95); }
+  if (mask & 16) a.parts[4].children.forEach((o, i) => { const k = (time * 0.9 + i * 0.25) % 1, t = i * 1.7 + time; o.position.set(Math.cos(t) * 0.75, 0.3 + k * a.mh, Math.sin(t) * 0.75); o.rotation.y = time * 3; });
+}
+function fxDots(mask) { let h = ''; for (let i = 0; i < 5; i++) if (mask & (1 << i)) h += '<span title="' + DRUGS[i].name + '" style="display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:2px;background:' + DRUGS[i].col + '"></span>'; return h ? ' ' + h : ''; }
 
 // ============================== CLIENT: events
 const DEATHS = ['WASTED', 'SKILL ISSUE', 'L + RATIO', 'GET REKT', 'EMOTIONAL DAMAGE', 'BRO FELL OFF', 'UNINSTALL?'];
@@ -1055,7 +1086,7 @@ function renderShop() {
   h += '<div style="color:#888;margin-top:5px">F closes &middot; you heal fast in here</div>'; el.innerHTML = h;
 }
 let netT = 0;
-function sendState(st) { sendHost({ t: 'p', s: { n: me.name, h: me.hero, tm: me.team, x: +me.x.toFixed(2), y: +me.y.toFixed(2), z: +me.z.toFixed(2), yw: +me.face.toFixed(2), st, hp: Math.ceil(me.hp), mhp: me.mhp, sc: +me.scale.toFixed(2), hi: Math.round(me.high), k: me.kills, pk: me.pk, d: me.deaths, l: me.lvl, gh: me.ghT > 0 ? 1 : 0 } }); }
+function sendState(st) { sendHost({ t: 'p', s: { n: me.name, h: me.hero, tm: me.team, x: +me.x.toFixed(2), y: +me.y.toFixed(2), z: +me.z.toFixed(2), yw: +me.face.toFixed(2), st, hp: Math.ceil(me.hp), mhp: me.mhp, sc: +me.scale.toFixed(2), hi: Math.round(me.high), k: me.kills, pk: me.pk, d: me.deaths, l: me.lvl, gh: me.ghT > 0 ? 1 : 0, fx: fxMask() } }); }
 function updateMe(dt, time) {
   const H = HEROES[me.hero], g = H.gun;
   if (!me.ready) return;
@@ -1137,6 +1168,7 @@ function updateMe(dt, time) {
   // own model
   const inst = me.inst; inst.g.position.set(me.x, me.y, me.z); inst.g.rotation.set(me.down > 0 ? -Math.PI / 2 : 0, me.face, 0, 'YXZ'); inst.g.scale.setScalar(inst.base * me.scale);
   if (inst.sm) inst.sm.material = me.ghT > 0 ? GHOSTMAT : BAKEMAT;
+  updateAura(auraOf(inst, me.hero), fxMask(), time, me.down <= 0);
   inst.play(me.down > 0 ? 'Idle' : me.shotT > 0 ? 'Attack' : me.moving || me.chargeT > 0 ? 'Walk' : me.ads ? 'Aim' : 'Idle'); inst.mixer.update(dt * (me.chargeT > 0 ? 3 : me.moving ? spd / 8 : 1));
   // net
   if (hitQ.length) { sendHost({ t: 'hit', h: hitQ }); hitQ = []; }
@@ -1204,7 +1236,7 @@ function updateHud(time) {
   const rampTxt = !G.st ? ' &middot; ramps are on in warmup' : G.rg > 0 ? ' &middot; <b style="color:#ff3b3b">RING CLOSING</b>' : G.rm > 0 ? ' &middot; <b style="color:#ff8a1e">RAMPS ONLINE ' + Math.ceil(G.rm) + 's</b>' : ' &middot; ramps in ' + Math.floor(G.rn / 60) + ':' + String(G.rn % 60).padStart(2, '0');
   const labTxt = G.lo >= 0 ? 'THE LAB: held by <b style="color:' + TEAMS[G.lo].c + '">' + TEAMS[G.lo].n + '</b>' + (G.lt >= 0 && G.lt !== G.lo ? ', <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> taking it ' + Math.floor(G.lp) + '%' : G.lo === me.team ? ' (stand in it for coins)' : '') : G.lt >= 0 ? 'THE LAB: <b style="color:' + TEAMS[G.lt].c + '">' + TEAMS[G.lt].n + '</b> capturing ' + Math.floor(G.lp) + '%' : 'THE LAB (middle): be alone in the circle to capture it';
   $('labbar').innerHTML = (!G.st ? (isHost ? 'WARMUP &middot; <b style="color:#fff">ENTER</b> starts the match (' + Object.keys(others).length + ' in lobby)' : 'WARMUP &middot; waiting for the host to start') + ' &middot; <b style="color:#fff">C</b> changes character' : labTxt) + rampTxt;
-  let th = ''; for (const id in others) { const p = others[id]; th += '<div class="panel" style="border-left:4px solid ' + TEAMS[p.tm].c + '">' + (id === me.id ? '▶ ' : '') + (p.fed ? '\u{1F451} ' : '') + p.n + ' <span style="color:#ffe600">L' + (p.l || 1) + '</span> <span style="color:#aaa">' + HEROES[p.h].name + '</span> ' + (p.st === 5 ? '<span style="color:#ff3b3b">OUT</span>' : p.st === 3 ? '<span style="color:#ff3b3b">DEAD</span>' : Math.max(0, p.hp) + 'hp') + ' <span style="color:#ffe600">' + (p.pk || 0) + 'PK</span></div>'; } $('team').innerHTML = th;
+  let th = ''; for (const id in others) { const p = others[id]; th += '<div class="panel" style="border-left:4px solid ' + TEAMS[p.tm].c + '">' + (id === me.id ? '▶ ' : '') + (p.fed ? '\u{1F451} ' : '') + p.n + ' <span style="color:#ffe600">L' + (p.l || 1) + '</span> <span style="color:#aaa">' + HEROES[p.h].name + '</span> ' + (p.st === 5 ? '<span style="color:#ff3b3b">OUT</span>' : p.st === 3 ? '<span style="color:#ff3b3b">DEAD</span>' : Math.max(0, p.hp) + 'hp') + fxDots(p.fx || 0) + ' <span style="color:#ffe600">' + (p.pk || 0) + 'PK</span></div>'; } $('team').innerHTML = th;
   if (toastT > 0) { toastT -= 0.1; if (toastT <= 0) $('toast').textContent = ''; }
   if (me.safeT > 0 && G.st) toast('spawn shield ' + me.safeT.toFixed(0) + 's', 0.3);
   $('lockmsg').style.display = (!locked && !AUTO && !G.ov) ? 'block' : 'none';
