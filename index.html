@@ -134,6 +134,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>THE LAB:</b> be the only colour in the middle circle (minions count) to capture it: a batch on capture, then coins for as long as you stand in it.<br>
     <b>RANGE:</b> towers and stashes only take damage from inside their ring, and towers shoot players inside it.<br>
     <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 20 s every 4 minutes (and all through warmup).<br>
+    <b>COMEBACK:</b> you level faster the further you are behind the top level (+30% XP per level, plus a slow free trickle), and the leader levels slower. You can shop while dead.<br>
     <b>AURAS:</b> everyone can see what you are on. Cyan rings = G-Fuel, pink spores = Shrooms, green bubble = Copium, brown ground ring = Brownie, blue drops = Water. Matching pips sit above the name and in the player list.<br>
     <b>MODES:</b> the host picks 1v1v1 (triangle, a lane between every pair) or 1v1 (two lanes around the lab). Joiners get whatever the host picked.<br>
     Empty colours are played by bots. Desktop + mouse only.
@@ -155,11 +156,11 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 16;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 17;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
-  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
+  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken, next shot within 3 s is a guaranteed crit). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
   { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto spray n pray, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
     gun: { name: 'SPRAY N PRAY', dmg: 10, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50 }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
@@ -469,7 +470,7 @@ let worldBuilt = false;   // the host builds the map for its chosen mode; a join
 const me = { id: 'host', team: 0, ready: false, name: 'PLAYER', hero: 0, x: 0, y: 0, z: -90, vy: 0, yaw: 0, pitch: 0, face: 0, hp: 100, mhp: 100, shield: 0, ammo: 0, reloadT: 0, fireT: 0, shotT: 0, qT: 0, eT: 0, dashT: 0, dashX: 0, dashZ: 0,
   down: 0, downKind: '', willElim: false, elim: false, safeT: 0, lastBy: '', lastByT: 0, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], fxMax: [1, 1, 1, 1, 1], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0,
   strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0, kx: 0, kz: 0, padT: 0, boostT: 0,
-  ghT: 0, chargeT: 0, chargeX: 0, chargeZ: 0, chargeHit: null, recallT: 0, regenT: 0, shop: false, shopTgt: 0, fed: false, under: false, ring: null };
+  ghT: 0, critT: 0, behind: 0, lead: 0, chargeT: 0, chargeX: 0, chargeZ: 0, chargeHit: null, recallT: 0, regenT: 0, shop: false, shopTgt: 0, fed: false, under: false, ring: null };
 const keys = {}; let firing = false, locked = false;
 const fxOn = id => me.fx[DI[id]] > 0;
 const isBot = id => typeof id === 'string' && id.startsWith('bot');
@@ -786,7 +787,7 @@ function applySnap(s) {
   for (const [id, p] of pickViews) if (!sp.has(id)) { scene.remove(p.g); pickViews.delete(id); }
   // who is fed: 3+ levels above the lowest rival. who is behind: strictly the lowest level.
   const ids = Object.keys(others), lv = id => id === me.id ? me.lvl : (others[id].l || 1);
-  for (const id of ids) { let mn = 99; for (const o of ids) if (o !== id) mn = Math.min(mn, lv(o)); others[id].fed = ids.length > 1 && lv(id) >= mn + 3; if (id === me.id) { me.fed = others[id].fed; me.under = ids.length > 1 && me.lvl < mn; } }
+  for (const id of ids) { let mn = 99; for (const o of ids) if (o !== id) mn = Math.min(mn, lv(o)); others[id].fed = ids.length > 1 && lv(id) >= mn + 3; if (id === me.id) { let mx = 0; for (const o of ids) if (o !== id) mx = Math.max(mx, lv(o)); me.fed = others[id].fed; me.under = ids.length > 1 && me.lvl < mn; me.behind = ids.length > 1 ? Math.max(0, mx - me.lvl) : 0; me.lead = ids.length > 1 ? Math.max(0, me.lvl - mn) : 0; } }
   for (const id of ids) {
     if (id === me.id) continue; const p = others[id]; let pv = pviews.get(id);
     if (!pv || pv.hero !== p.h || pv.tm !== p.tm) {
@@ -937,7 +938,9 @@ function onKill(ev) {
   if (me.multi >= 3) banner(MULTI[Math.min(6, me.multi)], '', me.multi >= 4);
   else if (ev.hs && Math.random() < 0.2) banner('BOOM HEADSHOT', '');
 }
-function gainXp(x) { me.xp += x; let need = 45 + 30 * me.lvl; while (me.xp >= need) { me.xp -= need; me.lvl++; me.mhp += 12; me.hp = Math.min(me.mhp, me.hp + 30); need = 45 + 30 * me.lvl; banner('LEVEL ' + me.lvl, '+10% damage, +12 max HP', false, '#ffe600'); playClip('level-up'); } }
+// +30% XP per level you are behind the highest rival (up to +150%); -12% per level you are ahead of the lowest (down to -60%)
+function xpScale() { return me.behind > 0 ? Math.min(2.5, 1 + 0.3 * me.behind) : me.lead > 0 ? Math.max(0.4, 1 - 0.12 * me.lead) : 1; }
+function gainXp(x) { me.xp += x * xpScale(); let need = 45 + 30 * me.lvl; while (me.xp >= need) { me.xp -= need; me.lvl++; me.mhp += 12; me.hp = Math.min(me.mhp, me.hp + 30); need = 45 + 30 * me.lvl; banner('LEVEL ' + me.lvl, '+10% damage, +12 max HP', false, '#ffe600'); playClip('level-up'); } }
 function gotPick(k) {
   SFX.pickup();
   if (k === 9) { const a = []; for (let i = 0; i < 2; i++) { const j = Math.floor(Math.random() * 5); me.inv[j]++; a.push(DRUGS[j].name); } addCoins(60); me.hp = Math.min(me.mhp, me.hp + 50); me.ammo = HEROES[me.hero].gun.mag; banner('CARE PACKAGE SECURED', a.join(' + ') + ' + 60 coins', false, '#19e3ff'); sendHost({ t: 'feed', m: tagOf(me.id) + ' yoinked the care package' }); }
@@ -947,7 +950,7 @@ function gotPick(k) {
 // ============================== CLIENT: me
 function spawnPos(tm) { const b = BASES[tm], l = hyp(b.x, b.z); return { x: b.x - b.x / l * 15 + rnd(-4, 4), z: b.z - b.z / l * 15 + rnd(-4, 4), yaw: Math.atan2(-b.x, -b.z) }; }
 function resetMe() {
-  const H = HEROES[me.hero], sp = spawnPos(me.team); Object.assign(me, { x: sp.x, y: 0, z: sp.z, vy: 0, yaw: sp.yaw, face: sp.yaw, pitch: 0, hp: H.hp, mhp: H.hp, shield: 0, ammo: H.gun.mag, reloadT: 0, fireT: 0, qT: 0, eT: 0, dashT: 0, down: 0, willElim: false, elim: false, safeT: 3, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0, strike: 0, nuke: 0, scale: 1, kx: 0, kz: 0, padT: 0, boostT: 0, ghT: 0, chargeT: 0, recallT: 0, regenT: 0, shop: false });
+  const H = HEROES[me.hero], sp = spawnPos(me.team); Object.assign(me, { x: sp.x, y: 0, z: sp.z, vy: 0, yaw: sp.yaw, face: sp.yaw, pitch: 0, hp: H.hp, mhp: H.hp, shield: 0, ammo: H.gun.mag, reloadT: 0, fireT: 0, qT: 0, eT: 0, dashT: 0, down: 0, willElim: false, elim: false, safeT: 3, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0, strike: 0, nuke: 0, scale: 1, kx: 0, kz: 0, padT: 0, boostT: 0, ghT: 0, critT: 0, chargeT: 0, recallT: 0, regenT: 0, shop: false });
   $('center').style.display = 'none';
   if (me.inst) { if (me.ring) me.inst.g.remove(me.ring); me.ring = teamRing(me.inst, me.team); }
 }
@@ -983,7 +986,7 @@ function goDown(kind, src, by) {
   me.downKind = kind; me.fx = [0, 0, 0, 0, 0]; me.pend = []; me.high = 0; me.shield = 0; me.streak = 0; me.comedown = 0; me.ghT = 0; me.chargeT = 0; me.recallT = 0; me.shop = false; firing = false;
   const c = $('center'); c.style.display = 'block';
   if (kind === 'od') { me.down = 4; me.hp = Math.max(25, me.hp * 0.5); c.innerHTML = 'GREENED OUT<small>you flew too close to the sun. helpless for 4 seconds.</small>'; c.style.color = '#9dff6a'; sendHost({ t: 'feed', m: tagOf(me.id) + ' greened out (skill issue)' }); SFX.boom(); }
-  else { const alive = myCoreAlive(); me.willElim = !alive; me.down = alive ? 5 + Math.min(9, G.t / 90) : 3; me.deaths++; me.hp = 0; c.innerHTML = pick(DEATHS) + '<small>' + (alive ? 'respawning at your stash...' : 'your stash is gone. that was your last life.') + '</small>'; c.style.color = '#ff3b3b'; sendHost({ t: 'died', by: by || '', et: src || '' }); SFX.boom(); }
+  else { const alive = myCoreAlive(); me.willElim = !alive; me.down = alive ? 5 + Math.min(9, G.t / 90) : 3; me.deaths++; me.hp = 0; c.innerHTML = pick(DEATHS) + '<small>' + (alive ? 'respawning at your stash... press F to shop while you wait' : 'your stash is gone. that was your last life.') + '</small>'; c.style.color = '#ff3b3b'; sendHost({ t: 'died', by: by || '', et: src || '' }); SFX.boom(); }
 }
 function takeDamage(d, src, by, kb) {
   if ((me.down > 0 && me.downKind !== 'od') || me.dashT > 0 || me.safeT > 0 || me.elim || G.ov || !G.st) return;
@@ -1040,12 +1043,13 @@ function tryFire() {
   if (me.ammo <= 0) { reload(); return; }
   me.fireT = g.rate / (fxOn('zoom') ? 1.4 : 1); if (me.combo < 4) me.ammo--; me.shotT = 0.3; me.recallT = 0; SFX.shot(me.hero);
   let mult = dmgMult(); if (me.ghT > 0) { mult *= 1.4; me.ghT = 0; toast('ambush: +40%', 1); }
+  const crit = me.critT > 0; me.critT = 0;
   const mz = muzzle();
   for (let i = 0; i < g.pellets; i++) {
     const d = camDir.clone(), sp = g.spread * (me.ads ? 0.45 : 1) + (g.zoom < 30 && !me.ads ? 0.045 : 0);
     d.x += rnd(-sp, sp); d.y += rnd(-sp, sp); d.z += rnd(-sp, sp); d.normalize();
     const res = castShot(camPos, d, g.range), fall = g.range ? clamp(1 - (res.dist - g.range * 0.4) / (g.range * 0.6) * 0.7, 0.3, 1) : 1; tracer(mz, res.p, H.col, g.pellets > 1 ? 0.05 : g.zoom < 30 ? 0.14 : 0.07, g.zoom < 30 ? 0.3 : 0.09);
-    if (res.v && !(res.v.fl & 1)) hitEnt(res.v, g.dmg * mult * fall * (res.hs ? g.hs : 1), res.hs, res.p);
+    if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (crit && !res.v.struct); hitEnt(res.v, g.dmg * mult * fall * (hs ? g.hs : 1), hs, res.p); }
     else if (res.v) toast(res.v.t === 'co' ? 'shielded: drop one of its T2 towers first' : 'shielded: drop the T1 in front of it first', 1.5);
   }
   me.recoil = Math.min(0.12, me.recoil + (g.zoom < 30 ? 0.045 : g.pellets > 1 ? 0.03 : 0.005));
@@ -1054,7 +1058,7 @@ function tryFire() {
 const zones = [], pending = [];
 function ability() {
   const H = HEROES[me.hero]; if (me.qT > 0 || me.down > 0 || me.elim || me.chargeT > 0) return; me.qT = H.q.cd; me.ghT = 0; me.recallT = 0;
-  if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); }
+  if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); me.critT = 3; toast('dive shot: your next shot is a guaranteed crit', 1.5); }
   else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 42 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 38 * m, life: 4, tick: 0.5 }); }
   else { const m = dmgMult(); boomAt(me.x, me.z, 10, 120 * m, 0xd0a070, 0.5, 14); me.vy = 7; }
 }
@@ -1070,7 +1074,9 @@ function nuke() { if (me.nuke <= 0 || me.down > 0 || me.elim) return; me.nuke--;
 function recall() { if (me.down > 0 || me.elim || G.ov || me.recallT > 0) return; if (!myCoreAlive()) { toast('no stash to recall to'); return; } if (inBase()) { toast('already home'); return; } me.recallT = 4; toast('recalling: hold still for 4 seconds', 1.5); }
 // ---------- shop (only inside your base ring). keys: 1-4 minions, 5-9 substances, Tab = where minions go
 function shopTargets() { const a = []; for (let t = 0; t < NT; t++) if (t !== me.team && coreHp(t) > 0) a.push({ g: t, n: TEAMS[t].n, c: TEAMS[t].c }); a.push({ g: 3, n: 'THE LAB', c: '#ffe600' }); return a; }
-function toggleShop() { if (me.shop) { me.shop = false; return; } if (me.down > 0 || me.elim) return; if (!inBase()) { toast(myCoreAlive() ? 'the shop is at your stash: go home or press B to recall' : 'your stash is gone. no more shopping.', 2); return; } me.shop = true; }
+// the shop works inside your base ring, and also while you are dead and waiting to respawn (not once your stash is gone)
+function canShop() { if (me.elim || !myCoreAlive()) return false; if (me.down > 0) return me.downKind === 'dead' && !me.willElim; return inBase(); }
+function toggleShop() { if (me.shop) { me.shop = false; return; } if (me.elim) return; if (!canShop()) { toast(!myCoreAlive() ? 'your stash is gone. no more shopping.' : me.down > 0 ? 'not while you are greened out' : 'the shop is at your stash: go home or press B to recall', 2); return; } me.shop = true; }
 function buy(i) {
   if (!me.shop) return;
   if (i < UNITS.length) { const U = UNITS[i], tg = shopTargets(), T = tg[me.shopTgt % tg.length]; if (me.coins < U.cost) { toast('not enough coins for ' + U.name, 1.2); SFX.hurt(); return; } me.coins -= U.cost; sendHost({ t: 'buy', u: i, g: T.g }); SFX.pickup(); toast(U.name + ' sent at ' + T.n, 1.5); }
@@ -1083,7 +1089,7 @@ function renderShop() {
   UNITS.forEach((u, i) => { h += '<div style="opacity:' + (c >= u.cost ? 1 : 0.4) + '"><b style="color:#ffe600">' + (i + 1) + '</b> ' + u.name + ' <span style="float:right">' + u.cost + '</span></div>'; });
   h += '<div style="height:6px"></div>';
   DRUGS.forEach((d, i) => { h += '<div style="opacity:' + (c >= d.cost ? 1 : 0.4) + '"><b style="color:#ffe600">' + (i + 1 + UNITS.length) + '</b> <span style="color:' + d.col + '">' + d.name + '</span> <span style="float:right">' + d.cost + '</span></div>'; });
-  h += '<div style="color:#888;margin-top:5px">F closes &middot; you heal fast in here</div>'; el.innerHTML = h;
+  h += '<div style="color:#888;margin-top:5px">F closes &middot; ' + (me.down > 0 ? 'shopping from the grave' : 'you heal fast in here') + '</div>'; el.innerHTML = h;
 }
 let netT = 0;
 function sendState(st) { sendHost({ t: 'p', s: { n: me.name, h: me.hero, tm: me.team, x: +me.x.toFixed(2), y: +me.y.toFixed(2), z: +me.z.toFixed(2), yw: +me.face.toFixed(2), st, hp: Math.ceil(me.hp), mhp: me.mhp, sc: +me.scale.toFixed(2), hi: Math.round(me.high), k: me.kills, pk: me.pk, d: me.deaths, l: me.lvl, gh: me.ghT > 0 ? 1 : 0, fx: fxMask() } }); }
@@ -1092,9 +1098,9 @@ function updateMe(dt, time) {
   if (!me.ready) return;
   if (me.elim) { if ((netT -= dt) <= 0) { netT = 0.25; sendState(5); } return; }
   // timers
-  me.fireT -= dt; me.shotT -= dt; me.qT -= dt; me.eT -= dt; me.multiT -= dt; me.hurtT -= dt; me.safeT -= dt; me.ghT -= dt; me.regenT -= dt;
+  me.fireT -= dt; me.shotT -= dt; me.qT -= dt; me.eT -= dt; me.multiT -= dt; me.hurtT -= dt; me.safeT -= dt; me.ghT -= dt; me.regenT -= dt; me.critT -= dt;
   if (me.reloadT > 0 && (me.reloadT -= dt) <= 0) me.ammo = g.mag;
-  if (G.st && !G.ov) addCoins(1.2 * dt);
+  if (G.st && !G.ov) { addCoins(1.2 * dt); if (me.behind > 0) gainXp(0.6 * me.behind * dt); }   // and a slow free trickle of XP while behind
   // substances
   let act = 0;
   for (let k = 0; k < 5; k++) { if (me.fx[k] > 0) { me.fx[k] -= dt; if (me.fx[k] <= 0) { me.fx[k] = 0; toast(DRUGS[k].name + ' wore off'); if (DRUGS[k].id === 'brownie') me.shield = 0; } else act++; } me.tol[k] = Math.max(0, me.tol[k] - dt / 45); }
@@ -1108,7 +1114,7 @@ function updateMe(dt, time) {
     if (me.regenT > 0) me.hp = Math.min(me.mhp, me.hp + me.mhp * 0.05 * dt);
     if (home) me.hp = Math.min(me.mhp, me.hp + 30 * dt); else if (me.hurtT <= 0) me.hp = Math.min(me.mhp, me.hp + 7 * dt);
   }
-  if (me.shop && !home) me.shop = false;
+  if (me.shop && !canShop()) me.shop = false;
   // closing ring burns anyone outside it (spawn shield does not help)
   if (G.rg > 0 && me.down <= 0 && hyp(me.x, me.z) > G.rg) { me.hp -= 22 * dt; me.hurtT = 5; $('flash').style.opacity = 0.5; if (me.hp <= 0) goDown('dead', '', ''); }
   const giant = fxOn('brownie'); me.scale += ((giant ? 2.4 : 1) - me.scale) * Math.min(1, dt * 4);
@@ -1224,9 +1230,9 @@ function updateHud(time) {
   $('xpb').firstElementChild.style.width = (me.xp / (45 + 30 * me.lvl) * 100) + '%';
   $('hib').firstElementChild.style.width = clamp(me.high, 0, 100) + '%'; $('hin').textContent = TIERS.find(t => me.high < t[0])[1]; $('hiv').textContent = Math.round(me.high) + '% high · +' + Math.round((dmgMult() - 1) * 100) + '% dmg';
   $('ammo').textContent = me.reloadT > 0 ? 'RELOADING' : me.combo >= 4 ? '∞' : me.ammo + ' / ' + H.gun.mag; $('ammo').style.fontSize = me.reloadT > 0 ? '26px' : '44px'; $('gun').textContent = H.name + ' · ' + H.gun.name;
-  $('abil').innerHTML = '<b>Q</b> ' + H.q.name + (me.qT > 0 ? ' ' + me.qT.toFixed(1) + 's' : ' READY') + '<br><b>E</b> ' + H.e.name + (me.ghT > 0 ? ' ACTIVE ' + me.ghT.toFixed(1) + 's' : me.eT > 0 ? ' ' + Math.ceil(me.eT) + 's' : ' READY') + '<br><b>B</b> recall &middot; <b>F</b> shop' + (me.strike ? ' &middot; <b>G</b> STRIKE x' + me.strike : '') + (me.nuke ? ' &middot; <b>N</b> NUKE' : '');
+  $('abil').innerHTML = '<b>Q</b> ' + H.q.name + (me.qT > 0 ? ' ' + me.qT.toFixed(1) + 's' : ' READY') + (me.critT > 0 ? ' <span style="color:#ffe600">CRIT SHOT ' + me.critT.toFixed(1) + 's</span>' : '') + '<br><b>E</b> ' + H.e.name + (me.ghT > 0 ? ' ACTIVE ' + me.ghT.toFixed(1) + 's' : me.eT > 0 ? ' ' + Math.ceil(me.eT) + 's' : ' READY') + '<br><b>B</b> recall &middot; <b>F</b> shop' + (me.strike ? ' &middot; <b>G</b> STRIKE x' + me.strike : '') + (me.nuke ? ' &middot; <b>N</b> NUKE' : '');
   for (let i = 0; i < 5; i++) { const s = $('sl' + i); $('sc' + i).textContent = me.fx[i] > 0 ? me.fx[i].toFixed(0) + 's' : 'x' + me.inv[i]; s.classList.toggle('on', me.fx[i] > 0); s.classList.toggle('zero', me.inv[i] <= 0 && me.fx[i] <= 0); $('stt' + i).style.width = (me.fx[i] > 0 ? me.fx[i] / me.fxMax[i] * 100 : 0) + '%'; }
-  $('streak').innerHTML = (me.fed ? '\u{1F451} YOU ARE FED: everyone can see you<br>' : me.under ? 'underdog: +25% coins<br>' : '') + (me.streak >= 3 ? '🔥 ' + me.streak + ' STREAK' : '');
+  $('streak').innerHTML = (me.fed ? '\u{1F451} YOU ARE FED: everyone can see you<br>' : '') + (me.behind > 0 ? 'catching up: +' + Math.round((xpScale() - 1) * 100) + '% XP' + (me.under ? ', +25% coins' : '') + '<br>' : me.lead > 0 ? 'in the lead: ' + Math.round((xpScale() - 1) * 100) + '% XP<br>' : '') + (me.streak >= 3 ? '🔥 ' + me.streak + ' STREAK' : '');
   const ch = $('chan'); if (me.recallT > 0) { ch.style.display = 'block'; ch.firstElementChild.style.width = (1 - me.recallT / 4) * 100 + '%'; ch.lastElementChild.textContent = 'RECALLING ' + me.recallT.toFixed(1) + 's'; } else if (ch.style.display !== 'none') ch.style.display = 'none';
   renderShop();
   const t = Math.floor(G.t), cores = [0, 0, 0]; for (const v of views.values()) if (v.t === 'co') cores[v.team] = v.hp / v.mhp;
