@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 22;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 23;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -1022,7 +1022,7 @@ function applyDrug(k) {
   const D = DRUGS[k], dur = D.dur * Math.max(0.45, 1 - 0.15 * me.tol[k]);
   me.fx[k] = Math.max(me.fx[k], dur); me.fxMax[k] = dur; me.tol[k] += 1; me.high += D.dose; me.comedown = 0;
   banner(D.tag, D.sub + (me.tol[k] > 1.5 ? ' &middot; tolerance building' : ''), false, D.col);
-  if (D.id === 'brownie') { me.shield = 200; SFX.boom(); }
+  if (D.id === 'brownie') { me.shield = 80; SFX.boom(); }   // was 200
   if (D.id === 'cope') toast('this is fine.');
   if (me.high > 100) goDown('od');
 }
@@ -1035,7 +1035,7 @@ function goDown(kind, src, by) {
 }
 function takeDamage(d, src, by, kb) {
   if ((me.down > 0 && me.downKind !== 'od') || me.dashT > 0 || me.safeT > 0 || me.elim || G.ov || !G.st) return;
-  if (fxOn('cope')) d *= 0.5; if (fxOn('brownie')) d *= 0.6; if (me.chargeT > 0) d *= 0.5;
+  if (fxOn('cope')) d *= 0.5; if (fxOn('brownie')) d *= 0.85; if (me.chargeT > 0) d *= 0.5;
   if (me.shield > 0) { const a = Math.min(me.shield, d); me.shield -= a; d -= a; }
   if (by) { me.lastBy = by; me.lastByT = performance.now(); }
   if (kb && me.chargeT <= 0) { me.kx += kb[0]; me.kz += kb[1]; me.vy = Math.max(me.vy, 6); me.ground = false; }
@@ -1308,7 +1308,7 @@ const mctx = $('mini').getContext('2d');
 function updateHud(time) {
   const H = HEROES[me.hero];
   $('hpt').innerHTML = Math.max(0, Math.ceil(me.hp)) + '<span style="font-size:15px;color:#aaa"> / ' + me.mhp + ' &middot; <b style="color:#ffe600;font-weight:400">LVL ' + me.lvl + '</b> &middot; <span style="color:#ffe600">' + Math.floor(me.coins) + ' coins</span> &middot; ' + me.pk + ' PK</span>';
-  $('hpb').firstElementChild.style.width = clamp(me.hp / me.mhp * 100, 0, 100) + '%'; $('shb').style.width = clamp(me.shield / 200 * 100, 0, 100) + '%';
+  $('hpb').firstElementChild.style.width = clamp(me.hp / me.mhp * 100, 0, 100) + '%'; $('shb').style.width = clamp(me.shield / me.mhp * 100, 0, 100) + '%';
   $('xpb').firstElementChild.style.width = (me.xp / (45 + 30 * me.lvl) * 100) + '%';
   $('hib').firstElementChild.style.width = clamp(me.high, 0, 100) + '%'; $('hin').textContent = TIERS.find(t => me.high < t[0])[1]; $('hiv').textContent = Math.round(me.high) + '% high · +' + Math.round((dmgMult() - 1) * 100) + '% dmg';
   $('ammo').textContent = me.reloadT > 0 ? 'RELOADING' : me.combo >= 4 ? '∞' : me.ammo + ' / ' + H.gun.mag; $('ammo').style.fontSize = me.reloadT > 0 ? '26px' : '44px'; $('gun').textContent = H.name + ' · ' + H.gun.name;
