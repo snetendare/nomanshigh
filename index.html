@@ -128,7 +128,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>B</b> recall home (4 s) &middot; <b>F</b> shop at your stash<br>
     <b>C</b> change character in warmup &middot; <b>V</b> emote<br>
     <b>M</b> music &middot; <b>L</b> invite link &middot; <b>[ ]</b> sensitivity<br>
-    <b>WIN:</b> each colour has a stash and, on each lane, a T1 tower in front of a T2. Kill the T1 to expose the T2, kill a T2 to expose the stash. A busted stash leaves that player on a last life: kill them too. Last one alive wins. Once every stash is gone a ring closes on the middle.<br>
+    <b>WIN:</b> each colour has a stash and, on each lane, a T1 tower in front of a T2. Kill the T1 to expose the T2 behind it. The stash is shielded until <b>all</b> of that colour's towers are down. A busted stash leaves that player on a last life: kill them too. Last one alive wins. Once every stash is gone a ring closes on the middle.<br>
     <b>COINS:</b> last hits pay coins (so do towers, narcs and bounties). Spend them at your stash on minions, sent at a rival or to the lab, and on substances.<br>
     <b>LEVELS:</b> +6% damage and +8 HP each, shown on everyone's name. Higher level = bigger bounty. Three levels ahead of the lowest and you get a crown and show on every map.<br>
     <b>THE LAB:</b> be the only colour in the middle circle (minions count) to capture it: a batch on capture, then coins for as long as you stand in it.<br>
@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 26;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 27;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -677,7 +677,7 @@ function hostTick(dt) {
   for (let i = S.rifts.length - 1; i >= 0; i--) if ((S.rifts[i].t -= dt) <= 0) S.rifts.splice(i, 1);
   S.camps.forEach((c, i) => { if (c.alive <= 0 && c.resp > 0 && (c.resp -= dt) <= 0) spawnCamp(i); });
   // shields: a T2 is covered by its lane's T1; the stash by both of its T2s
-  for (let t = 0; t < NT; t++) { const b = t * 5; S.st[b + 1].inv = S.st[b + 2].hp > 0 ? 1 : 0; S.st[b + 3].inv = S.st[b + 4].hp > 0 ? 1 : 0; S.st[b].inv = (S.st[b + 1].hp > 0 && S.st[b + 3].hp > 0 && !S.sudden) ? 1 : 0; }
+  for (let t = 0; t < NT; t++) { const b = t * 5; S.st[b + 1].inv = S.st[b + 2].hp > 0 ? 1 : 0; S.st[b + 3].inv = S.st[b + 4].hp > 0 ? 1 : 0; S.st[b].inv = ((S.st[b + 1].hp > 0 || S.st[b + 3].hp > 0) && !S.sudden) ? 1 : 0; }   // the stash stays shielded until every tower of its colour is down (a T2 cannot fall before its T1)
   const arr = [...S.ents.values()], structs = arr.filter(e => ET[e.t].struct && e.hp > 0).map(e => ({ x: e.x, z: e.z, r: ET[e.t].r }));
   for (const id in S.bots) { const b = S.bots[id]; botTick(b, dt, arr, plist, structs); pubBot(b); }
   for (const e of arr) {
@@ -702,8 +702,12 @@ function hostTick(dt) {
       if (e.leash) { const dx = e.hx - e.x, dz = e.hz - e.z, dd = hyp(dx, dz); if (dd > 3.5) { e.x += dx / dd * d.spd * dt; e.z += dz / dd * d.spd * dt; e.yaw = Math.atan2(dx, dz); e.st = 1; } else e.st = 0; }
       else if (e.hunt) e.st = 0;
       else {
-        if (e.goal !== 3 && (e.goal < 0 || coreOf(e.goal).hp <= 0)) { const en = aliveEnemies(e.team); e.goal = en.length ? en[0] : 3; e.via = null; }
-        const vp = e.goal !== 3 && e.via ? e.via[0] : null, g = vp || (e.goal === 3 ? LAB : BASES[e.goal]), k = e.goal === 3 ? 0.5 : 1, dx = g.x + e.ox * k - e.x, dz = g.z + e.ox * 0.6 * k - e.z, dd = hyp(dx, dz) || 1;
+        if (e.goal !== 3 && (e.goal < 0 || coreOf(e.goal).hp <= 0)) { const en = aliveEnemies(e.team); e.goal = en.length ? en[0] : 3; e.via = null; e.sg = 0; }
+        const vp = e.goal !== 3 && e.via ? e.via[0] : null, k = e.goal === 3 ? 0.5 : 1; let g = vp || (e.goal === 3 ? LAB : BASES[e.goal]);
+        if (!vp && e.goal !== 3 && coreOf(e.goal).inv && (e.sg || hyp(g.x - e.x, g.z - e.z) < 40)) {   // its lane is open but the stash is still shielded: go for the nearest tower that can be hurt (and stick to that)
+          e.sg = 1; let bd = 1e9; for (let i = 1; i < 5; i++) { const o = S.st[e.goal * 5 + i]; if (o.hp <= 0 || o.inv) continue; const q = hyp(o.x - e.x, o.z - e.z); if (q < bd) { bd = q; g = o; } }
+        }
+        const dx = g.x + e.ox * k - e.x, dz = g.z + e.ox * 0.6 * k - e.z, dd = hyp(dx, dz) || 1;
         if (vp && dd < 10) { e.via.shift(); if (!e.via.length) e.via = null; }
         if (e.goal === 3 && dd < 2.5) e.st = 0; else { e.x += dx / dd * d.spd * dt; e.z += dz / dd * d.spd * dt; e.yaw = Math.atan2(dx, dz); e.st = 1; }
       }
@@ -1109,7 +1113,7 @@ function tryFire() {
     }
     const res = castShot(camPos, d, g.range), fall = g.range ? clamp(1 - (res.dist - g.range * 0.4) / (g.range * 0.6) * 0.7, 0.3, 1) : 1; tracer(mz, res.p, H.col, g.pellets > 1 ? 0.05 : g.zoom < 30 ? 0.14 : 0.07, g.zoom < 30 ? 0.3 : 0.09);
     if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (crit && !res.v.struct); hitEnt(res.v, g.dmg * mult * fall * (hs ? g.hs : 1), hs, res.p); }
-    else if (res.v) toast(res.v.t === 'co' ? 'shielded: drop one of its T2 towers first' : 'shielded: drop the T1 in front of it first', 1.5);
+    else if (res.v) toast(res.v.t === 'co' ? 'shielded: every tower of this colour has to fall first' : 'shielded: drop the T1 in front of it first', 1.5);
   }
   me.recoil = Math.min(0.12, me.recoil + (g.zoom < 30 ? 0.045 : g.pellets > 1 ? 0.03 : 0.005));
   return true;
