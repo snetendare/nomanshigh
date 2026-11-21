@@ -133,7 +133,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>LEVELS:</b> +6% damage and +8 HP each, shown on everyone's name. Higher level = bigger bounty. Three levels ahead of the lowest and you get a crown and show on every map.<br>
     <b>THE LAB:</b> be the only colour in the middle circle (minions count) to capture it: a batch on capture, then coins for as long as you stand in it.<br>
     <b>RANGE:</b> towers and stashes only take damage from inside their ring, and towers shoot players inside it.<br>
-    <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 45 s every 2 minutes (and all through warmup).<br>
+    <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 45 s every 2 minutes (and all through warmup). The launch ramps point a new way every time.<br>
     <b>COMEBACK:</b> you level faster the further you are behind the top level (+30% XP per level, plus a slow free trickle), and the leader levels slower. You can shop while dead.<br>
     <b>AURAS:</b> everyone can see what you are on: one dot circles your head per active substance, in its slot colour (cyan G-Fuel, pink Shrooms, green Copium, brown Brownie, blue Water). The same dots show in the player list.<br>
     <b>MODES:</b> the host picks 1v1v1 (triangle, a lane between every pair) or 1v1 (two lanes around the lab). Joiners get whatever the host picked.<br>
@@ -156,11 +156,11 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 32;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 33;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
-  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; then a 2 s charge with no shooting; after it your next shot within 3 s is a wide laser that pierces everything in its path: 150 to minions, 100 to players). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
+  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5, and a headshot kills any player at your level or below from full HP. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; then a 2 s charge with no shooting; after it your next shot within 3 s is a wide laser that pierces everything in its path: 150 to minions, 100 to players). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
   { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 130, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto fire bolts that take a moment to arrive, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
     gun: { name: 'SPRAY N PRAY', dmg: 9, rate: 0.095, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50, proj: { spd: 110, r: 0.2, size: 0.22 } }, q: { name: 'MOLOTOV', cd: 10 }, e: { name: 'ROCKET JUMP', cd: 16 } },
@@ -445,7 +445,20 @@ function buildWorld() {
   CAMPS.forEach(cp => { const mm = new THREE.Mesh(new THREE.RingGeometry(5.5, 6, 6), new THREE.MeshBasicMaterial({ color: 0x220000, side: THREE.DoubleSide, transparent: true, opacity: 0.5 })); mm.rotation.x = -Math.PI / 2; mm.position.set(cp.x, 0.05, cp.z); scene.add(mm); });
 }
 const PADCOL = [0xff8a1e, 0xff4fd8, 0x19e3ff], padViews = [];
+// Launch ramps turn to a new heading every time they come online. The host only sends a seed (G.rd); every client works
+// out the same heading per ramp from it: one of 8 compass steps away from the ramp's own direction. Seed 0 = as built.
+let padSeed = -1;
+function aimPads(seed) {
+  let i = 0;
+  for (const pv of padViews) {
+    const p = pv.p; if (p.k !== 0) continue; i++; if (p.dx0 === undefined) { p.dx0 = p.dx; p.dz0 = p.dz; }
+    let a = Math.atan2(p.dx0, p.dz0);
+    if (seed) { let h = (Math.imul(seed, 0x9e3779b1) + Math.imul(i, 0x85ebca6b)) >>> 0; h ^= h >>> 13; h = Math.imul(h, 0x5bd1e995) >>> 0; h ^= h >>> 15; a += (h % 8) * Math.PI / 4; }
+    p.dx = Math.sin(a); p.dz = Math.cos(a); pv.g.rotation.y = a;
+  }
+}
 function buildPads() {
+  padSeed = -1;
   for (const p of PADS) {
     const g = new THREE.Group(), mat = new THREE.MeshBasicMaterial({ color: 0x444444, transparent: true, opacity: 0.3, side: THREE.DoubleSide }), ex = []; g.position.set(p.x, 0, p.z);
     if (p.k === 0) {
@@ -497,7 +510,7 @@ let worldBuilt = false;   // the host builds the map for its chosen mode; a join
 const me = { id: 'host', team: 0, ready: false, name: 'PLAYER', hero: 0, x: 0, y: 0, z: -90, vy: 0, yaw: 0, pitch: 0, face: 0, hp: 100, mhp: 100, shield: 0, ammo: 0, reloadT: 0, fireT: 0, shotT: 0, qT: 0, eT: 0, dashT: 0, dashX: 0, dashZ: 0,
   down: 0, downKind: '', willElim: false, elim: false, safeT: 0, lastBy: '', lastByT: 0, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], fxMax: [1, 1, 1, 1, 1], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0,
   strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0, kx: 0, kz: 0, padT: 0, boostT: 0,
-  ghT: 0, critT: 0, lzC: 0, waterT: 0, behind: 0, lead: 0, chargeT: 0, chargeX: 0, chargeZ: 0, chargeHit: null, recallT: 0, regenT: 0, shop: false, shopTgt: 0, fed: false, under: false, ring: null };
+  ghT: 0, critT: 0, lzC: 0, waterT: 0, shopCat: 0, behind: 0, lead: 0, chargeT: 0, chargeX: 0, chargeZ: 0, chargeHit: null, recallT: 0, regenT: 0, shop: false, shopTgt: 0, fed: false, under: false, ring: null };
 const keys = {}; let firing = false, locked = false;
 const fxOn = id => me.fx[DI[id]] > 0;
 const isBot = id => typeof id === 'string' && id.startsWith('bot');
@@ -537,7 +550,7 @@ function joinPeer(code) {
 function hostReset() {
   const players = {}, teamOf = { host: 0 };
   if (S) for (const k in S.teamOf) if (!isBot(k)) { teamOf[k] = S.teamOf[k]; if (S.players[k]) players[k] = S.players[k]; }
-  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: Array(NT).fill(true), rampT: RAMP_EVERY, rampOn: 0, ring: 0,
+  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: Array(NT).fill(true), rampT: RAMP_EVERY, rampOn: 0, rampSeed: 0, ring: 0,
     rifts: [], lab: { p: 0, tm: -1, own: -1, sp: 0, payT: 0, bcd: 0 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, bots: {}, st: [] };
   for (const [t, team, x, z] of STRUCTS) S.st.push(spawn(t, team, x, z));
   S.camps.forEach((c, i) => spawnCamp(i));
@@ -679,7 +692,7 @@ function hostTick(dt) {
     if (!S.sudden && S.time > SUDDEN) { S.sudden = true; emit({ t: 'ann', m: 'SUDDEN DEATH', s: 'every stash is on fire.', c: '#ff3b3b', horn: 1 }); }
     if (S.sudden) for (let t = 0; t < NT; t++) { const c = coreOf(t); if (c.hp > 0) c.hp -= 25 * dt; }
     if (S.rampOn > 0) { if ((S.rampOn -= dt) <= 0) { S.rampOn = 0; emit({ t: 'toast', m: 'ramps offline. back in ' + (RAMP_EVERY - RAMP_ON) + ' seconds.' }); } }
-    else if ((S.rampT -= dt) <= 0) { S.rampT = RAMP_EVERY - RAMP_ON; S.rampOn = RAMP_ON; emit({ t: 'ann', m: 'RAMPS ONLINE', s: RAMP_ON + ' seconds of launch ramps, bounce pads and speed gates. send it.', c: '#ff8a1e', horn: 1 }); }
+    else if ((S.rampT -= dt) <= 0) { S.rampT = RAMP_EVERY - RAMP_ON; S.rampOn = RAMP_ON; S.rampSeed = 1 + Math.floor(Math.random() * 1e6); emit({ t: 'ann', m: 'RAMPS ONLINE', s: RAMP_ON + ' seconds of launch ramps, bounce pads and speed gates. the ramps point somewhere new: check before you send it.', c: '#ff8a1e', horn: 1 }); }
     // closing ring: once no stash is left, the play area shrinks onto the lab
     if (!S.ring && teamIds().every(t => coreOf(t).hp <= 0)) { S.ring = ARENA; emit({ t: 'ann', m: 'THE RING IS CLOSING', s: 'no stashes left. get to the middle or burn.', c: '#ff3b3b', horn: 1 }); }
     if (S.ring) S.ring = Math.max(16, S.ring - 2.6 * dt);
@@ -758,7 +771,7 @@ function hostTick(dt) {
 function makeSnap() {
   const e = []; for (const x of S.ents.values()) e.push([x.id, x.t, x.team, +x.x.toFixed(1), +x.z.toFixed(1), +x.yaw.toFixed(2), Math.ceil(x.hp), Math.ceil(x.mhp), x.st, (x.inv ? 1 : 0) | (x.big ? 2 : 0) | (x.hunt ? 4 : 0)]);
   const pk = []; for (const p of S.picks.values()) pk.push([p.id, p.k, p.x, p.z]);
-  return { t: 's', g: { t: S.time, st: S.started ? 1 : 0, ov: S.over, lp: S.lab.p, lt: S.lab.tm, lo: S.lab.own, sd: S.sudden ? 1 : 0, rm: +S.rampOn.toFixed(1), rn: Math.ceil(S.rampT), rg: +S.ring.toFixed(1) }, e, pk, p: S.players };
+  return { t: 's', g: { t: S.time, st: S.started ? 1 : 0, ov: S.over, lp: S.lab.p, lt: S.lab.tm, lo: S.lab.own, sd: S.sudden ? 1 : 0, rm: +S.rampOn.toFixed(1), rn: Math.ceil(S.rampT), rd: S.rampSeed, rg: +S.ring.toFixed(1) }, e, pk, p: S.players };
 }
 function onClientMsg(pid, m) {
   if (!S) return; const tm = S.teamOf[pid] ?? 0;
@@ -872,6 +885,7 @@ function updateViews(dt, time) {
     updateAura(auraOf(pv.inst, pv.hero), p.fx || 0, time, p.st !== 3 && p.st !== 5);
     pv.inst.play(p.st === 2 ? 'Attack' : p.st === 1 ? 'Walk' : p.st === 4 ? 'Aim' : 'Idle'); pv.inst.mixer.update(dt);
   }
+  if ((G.rd || 0) !== padSeed) { padSeed = G.rd || 0; aimPads(padSeed); }
   { const on = padsOn(); for (const pv of padViews) { pv.mat.color.setHex(on ? PADCOL[pv.p.k] : 0x444444); pv.mat.opacity = on ? 0.72 + 0.22 * Math.sin(time * 8 + pv.p.x) : 0.28; if (pv.p.k === 2) pv.g.children[0].rotation.z = on ? time * 2 : 0; for (const e of pv.ex) e.visible = on; } }
   for (const d of deco) d.mixer.update(dt);
   if (labWisp) labWisp.g.position.y = 2.4 + Math.sin(time * 2) * 0.4;
@@ -1142,7 +1156,13 @@ function tryFire() {
       sendHost({ t: 'pj', o: [+mz.x.toFixed(2), +mz.y.toFixed(2), +mz.z.toFixed(2)], d: [+dir.x.toFixed(3), +dir.y.toFixed(3), +dir.z.toFixed(3)], h: me.hero }); continue;
     }
     const res = castShot(camPos, d, g.range), fall = g.range ? clamp(1 - (res.dist - g.range * 0.4) / (g.range * 0.6) * 0.7, 0.3, 1) : 1; tracer(mz, res.p, H.col, g.pellets > 1 ? 0.05 : g.zoom < 30 ? 0.14 : 0.07, g.zoom < 30 ? 0.3 : 0.09);
-    if (res.v && !(res.v.fl & 1)) { const hs = res.hs || (crit && !res.v.struct); hitEnt(res.v, g.dmg * mult * fall * (hs ? g.hs : 1), hs, res.p); }
+    if (res.v && !(res.v.fl & 1)) {
+      const hs = res.hs || (crit && !res.v.struct); let dm = g.dmg * mult * fall * (hs ? g.hs : 1);
+      // the rifle's headshot is a one-tap on any player who is not a higher level than you: it does at least their whole max HP
+      // (their drugs still count: copium, a brownie shield, a dive or a bull charge can save them)
+      if (hs && H.id === 'sniper' && res.v.pid && me.lvl >= (res.v.s.l || 1)) dm = Math.max(dm, ((res.v.s.mhp || 0) + 1) / PVP);
+      hitEnt(res.v, dm, hs, res.p);
+    }
     else if (res.v) toast(res.v.t === 'co' ? 'shielded: every tower of this colour has to fall first' : 'shielded: drop the T1 in front of it first', 1.5);
   }
   me.recoil = Math.min(0.12, me.recoil + (g.zoom < 30 ? 0.045 : g.pellets > 1 ? 0.03 : 0.005));
@@ -1191,11 +1211,14 @@ function fireBeam(mult) {
 }
 function drawBeam(a, b) { const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b); tracer(A, B, 0x35e8ff, 1.6, 0.5); tracer(A, B, 0xffffff, 0.5, 0.5); tone(1500, 0.4, 'sawtooth', 0.08, 160); noise(0.35, 0.2, 3200); }
 function recall() { if (me.down > 0 || me.elim || G.ov || me.recallT > 0) return; if (!myCoreAlive()) { toast('no stash to recall to'); return; } if (inBase()) { toast('already home'); return; } me.recallT = 4; toast('recalling: hold still for 4 seconds', 1.5); }
-// ---------- shop (only inside your base ring). keys: 1-4 minions, 5-9 substances, Tab = where minions go
+// ---------- shop (only inside your base ring). F1 / F2 pick the page (minions, substances), number keys buy from it, Tab = where minions go
 function shopTargets() { const a = []; for (let t = 0; t < NT; t++) if (t !== me.team && coreHp(t) > 0) a.push({ g: t, n: TEAMS[t].n, c: TEAMS[t].c }); a.push({ g: 3, n: 'THE LAB', c: '#ffe600' }); return a; }
 // the shop works inside your base ring, and also while you are dead and waiting to respawn (not once your stash is gone)
 function canShop() { if (me.elim || !myCoreAlive()) return false; if (me.down > 0) return me.downKind === 'dead' && !me.willElim; return inBase(); }
 function toggleShop() { if (me.shop) { me.shop = false; return; } if (me.elim) return; if (!canShop()) { toast(!myCoreAlive() ? 'your stash is gone. no more shopping.' : me.down > 0 ? 'not while you are greened out' : 'the shop is at your stash: go home or press B to recall', 2); return; } me.shop = true; }
+// the shop's pages: F1, F2, ... switch between them; inside a page the number keys start at 1
+const SHOP_CATS = [{ n: 'MINIONS', from: 0, len: UNITS.length }, { n: 'SUBSTANCES', from: UNITS.length, len: DRUGS.length }];
+function shopKey(k) { const C = SHOP_CATS[me.shopCat] || SHOP_CATS[0]; if (k >= 0 && k < C.len) buy(C.from + k); }
 function buy(i) {
   if (!me.shop) return;
   if (i < UNITS.length) { const U = UNITS[i], tg = shopTargets(), T = tg[me.shopTgt % tg.length]; if (me.coins < U.cost) { toast('not enough coins for ' + U.name, 1.2); SFX.hurt(); return; } me.coins -= U.cost; sendHost({ t: 'buy', u: i, g: T.g }); SFX.pickup(); toast(U.name + ' sent at ' + T.n, 1.5); }
@@ -1204,10 +1227,11 @@ function buy(i) {
 function renderShop() {
   const el = $('shop'); if (!me.shop) { if (el.style.display !== 'none') el.style.display = 'none'; return; } el.style.display = 'block';
   const tg = shopTargets(), T = tg[me.shopTgt % tg.length], c = Math.floor(me.coins); let h = '<div style="font:22px Impact;letter-spacing:1px">THE STASH SHOP <span style="color:#ffe600">' + c + ' coins</span></div>';
-  h += '<div style="margin:5px 0">send minions at: ' + tg.map(t => '<span style="padding:1px 6px;border-radius:3px;' + (t === T ? 'background:' + t.c + ';color:#000' : 'color:' + t.c) + '">' + t.n + '</span>').join(' ') + ' <span style="color:#888">[TAB]</span></div>';
-  UNITS.forEach((u, i) => { h += '<div style="opacity:' + (c >= u.cost ? 1 : 0.4) + '"><b style="color:#ffe600">' + (i + 1) + '</b> ' + u.name + ' <span style="float:right">' + u.cost + '</span></div>'; });
-  h += '<div style="height:6px"></div>';
-  DRUGS.forEach((d, i) => { h += '<div style="opacity:' + (c >= d.cost ? 1 : 0.4) + '"><b style="color:#ffe600">' + (i + 1 + UNITS.length) + '</b> <span style="color:' + d.col + '">' + d.name + '</span> <span style="float:right">' + d.cost + '</span></div>'; });
+  h += '<div style="margin:6px 0">' + SHOP_CATS.map((C, i) => '<span style="padding:2px 8px;border-radius:3px;margin-right:4px;' + (i === me.shopCat ? 'background:#ffe600;color:#000' : 'color:#aaa;border:1px solid #555') + '"><b>F' + (i + 1) + '</b> ' + C.n + '</span>').join('') + '</div>';
+  if (me.shopCat === 0) {
+    h += '<div style="margin:5px 0">send at: ' + tg.map(t => '<span style="padding:1px 6px;border-radius:3px;' + (t === T ? 'background:' + t.c + ';color:#000' : 'color:' + t.c) + '">' + t.n + '</span>').join(' ') + ' <span style="color:#888">[TAB]</span></div>';
+    UNITS.forEach((u, i) => { h += '<div style="opacity:' + (c >= u.cost ? 1 : 0.4) + '"><b style="color:#ffe600">' + (i + 1) + '</b> ' + u.name + ' <span style="float:right">' + u.cost + '</span></div>'; });
+  } else DRUGS.forEach((d, i) => { h += '<div style="opacity:' + (c >= d.cost ? 1 : 0.4) + '"><b style="color:#ffe600">' + (i + 1) + '</b> <span style="color:' + d.col + '">' + d.name + '</span> <span style="color:#888">x' + me.inv[i] + '</span> <span style="float:right">' + d.cost + '</span></div>'; });
   h += '<div style="color:#888;margin-top:5px">F closes &middot; ' + (me.down > 0 ? 'shopping from the grave' : 'you heal fast in here') + '</div>'; el.innerHTML = h;
 }
 let netT = 0;
@@ -1251,7 +1275,7 @@ function updateMe(dt, time) {
     }
   }
   // input
-  if (AUTO) autopilot(dt);
+  if (AUTO && !window.NOPILOT) autopilot(dt);   // NOPILOT: a test can take the aim itself
   me.ads = !!keys.RMB && me.down <= 0;
   let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0);
   const l = hyp(fx, fz); me.moving = l > 0 && me.down <= 0 && me.chargeT <= 0;
@@ -1401,9 +1425,10 @@ function frame(now) {
   if ((hudT -= dt) <= 0) { hudT = 0.1; updateHud(time); }
 }
 addEventListener('keydown', e => {
-  if (!running) return; if (e.code === 'Tab' || e.code === 'Space') e.preventDefault(); if (e.repeat) return; keys[e.code] = true;
-  if (e.code.startsWith('Digit')) { const k = +e.code[5] - 1; if (me.shop) { if (k >= 0 && k < UNITS.length + DRUGS.length) buy(k); } else if (k >= 0 && k < 5) takeDrug(k); }
+  if (!running) return; if (e.code === 'Tab' || e.code === 'Space' || /^F[1-4]$/.test(e.code)) e.preventDefault(); if (e.repeat) return; keys[e.code] = true;
+  if (e.code.startsWith('Digit')) { const k = +e.code[5] - 1; if (me.shop) shopKey(k); else if (k >= 0 && k < 5) takeDrug(k); }
   if (e.code === 'Tab' && me.shop) me.shopTgt = (me.shopTgt + 1) % shopTargets().length;
+  if (me.shop && /^F[1-9]$/.test(e.code) && +e.code[1] <= SHOP_CATS.length) me.shopCat = +e.code[1] - 1;
   if (e.code === 'KeyF') toggleShop();
   if (e.code === 'KeyB') recall();
   if (e.code === 'KeyE') ability2();
