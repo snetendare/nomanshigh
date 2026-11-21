@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 31;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 32;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -560,6 +560,8 @@ function spawnLane(team, goal, t, o = {}, L) {   // L: which lane to take (picke
 }
 // a player standing inside their own base ring, stash still up: spiders cannot bite them there
 function homeSafe(p) { const B = BASES[p.tm]; return !!B && coreOf(p.tm).hp > 0 && hyp(p.x - B.x, p.z - B.z) < BASE_R; }
+// on a lane road (18 m wide, plus a little) or inside any base ring
+function inLaneOrBase(x, z) { return BASES.some(b => hyp(b.x - x, b.z - z) < BASE_R) || LANES.some(L => L.pts.some((p, i) => i > 0 && segDist(x, z, L.pts[i - 1], p) < 11)); }
 function spawnHunter(x, z, k) { const a = rnd(6.28), o = { x: x + Math.sin(a) * 30, z: z + Math.cos(a) * 30 }; pushOut(o, 1.5); spawn('spd', NEU, o.x, o.z, { hunt: 1, hpk: k }); }
 function dropPick(x, z, k) { const o = { x: x + rnd(-1.5, 1.5), z: z + rnd(-1.5, 1.5) }; pushOut(o, 1); const p = { id: S.nid++, k: k ?? Math.floor(Math.random() * DRUGS.length), x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); if (S.picks.size > 40) S.picks.delete(S.picks.keys().next().value); }
 function damageEnt(e, dmg, by, hs) { if (e.inv || e.hp <= 0) return; e.hp -= dmg; if (by) { e.last = by; e.lastHs = hs ? 1 : 0; } }
@@ -667,7 +669,10 @@ function hostTick(dt) {
         lanesOf(t).forEach((q, li) => { const j = laneEnd(q, t); if (coreOf(j).hp <= 0) return; const n = 2 + (S.time > 240 ? 1 : 0); for (let i = 0; i < n; i++) spawnLane(t, j, 'gob', { hpk: tk }, q); if ((S.wave + t + j + li) % 2 === 0) spawnLane(t, j, 'arc', { hpk: tk }, q); });
       }
     }
-    if ((S.huntT -= dt) <= 0) { S.huntT = 45; if (S.ents.size < 105) for (const p of plist) spawnHunter(p.x, p.z, tk); emit({ t: 'toast', m: 'snitch spiders are hunting everyone' }); }
+    if ((S.huntT -= dt) <= 0) {   // snitch spiders come for whoever is out in the jungle: nobody standing in a lane or a base gets one
+      S.huntT = 45; let sent = 0; if (S.ents.size < 105) for (const p of plist) if (!inLaneOrBase(p.x, p.z)) { spawnHunter(p.x, p.z, tk); sent++; }
+      if (sent) emit({ t: 'toast', m: 'snitch spiders are hunting everyone in the jungle' });
+    }
     if ((S.necT -= dt) <= 0) { S.necT = 110; const a = rnd(6.28); spawn('nec', NEU, Math.sin(a) * 60, Math.cos(a) * 60, { hunt: 1, hpk: tk }); emit({ t: 'ann', m: 'UNDERCOVER NARC', s: 'he is definitely not a cop. worth 70 coins.', c: '#b77bff' }); }
     if (!S.boss && (S.bossT -= dt) <= 0) { S.boss = 1; spawn('mam', NEU, 0, 14, { hx: 0, hz: 0, leash: 30, hpk: tk }); emit({ t: 'ann', m: 'THE DEA-PHANT', s: 'a pink elephant guards THE LAB. kill it and it fights for you.', c: '#ff7ad9', horn: 1 }); }
     if ((S.careT -= dt) <= 0) { S.careT = 60; const a = rnd(6.28), d = rnd(14, 48), o = { x: Math.sin(a) * d, z: Math.cos(a) * d }; pushOut(o, 2); const p = { id: S.nid++, k: 9, x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); emit({ t: 'ann', m: 'CARE PACKAGE INBOUND', s: 'near the middle. first come first served.', c: '#19e3ff' }); }
