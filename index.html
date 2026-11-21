@@ -156,18 +156,18 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 21;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 22;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
   { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; your next shot within 3 s is a wide laser that pierces and crits everything in its path). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
-  { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 140, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto fire bolts that take a moment to arrive, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
-    gun: { name: 'SPRAY N PRAY', dmg: 10, rate: 0.085, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50, proj: { spd: 110, r: 0.2, size: 0.22 } }, q: { name: 'MOLOTOV', cd: 8 }, e: { name: 'ROCKET JUMP', cd: 16 } },
+  { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 130, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto fire bolts that take a moment to arrive, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
+    gun: { name: 'SPRAY N PRAY', dmg: 9, rate: 0.095, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50, proj: { spd: 110, r: 0.2, size: 0.22 } }, q: { name: 'MOLOTOV', cd: 10 }, e: { name: 'ROCKET JUMP', cd: 16 } },
   { id: 'brute', name: 'THE BOUNCER', model: 'brute', hp: 220, spd: 8.3, col: 0xd0a070, desc: 'Tanky boomstick enjoyer. Close range only: pellets vanish past 20 m. <b>Q: Ground Pound</b> (slam around you). <b>E: Bull Charge</b> (rush that damages and shoves).',
-    gun: { name: 'BOOMSTICK', dmg: 11, rate: 0.72, mag: 6, reload: 1.9, spread: 0.055, pellets: 9, hs: 1.4, auto: false, zoom: 55, range: 20 }, q: { name: 'GROUND POUND', cd: 9 }, e: { name: 'BULL CHARGE', cd: 18 } },
+    gun: { name: 'BOOMSTICK', dmg: 13, rate: 0.72, mag: 6, reload: 1.9, spread: 0.055, pellets: 9, hs: 1.4, auto: false, zoom: 55, range: 20 }, q: { name: 'GROUND POUND', cd: 9 }, e: { name: 'BULL CHARGE', cd: 14 } },
   { id: 'warper', name: 'THE WARPER', model: 'warper', hp: 130, spd: 9.3, col: 0xb98cff, desc: 'Slow, heavy orbs: easy to land up close, dodgeable at range. <b>Q: Blink</b> (teleport 22 m where you aim). <b>E: Rift</b> (a portal pair for 8 s: you step through either way, your minions march from the first to the second).',
-    gun: { name: 'VOID ORBS', dmg: 40, rate: 0.5, mag: 8, reload: 1.7, spread: 0, pellets: 1, hs: 1.5, auto: true, zoom: 55, proj: { spd: 48, r: 0.9, size: 0.6 } }, q: { name: 'BLINK', cd: 10 }, e: { name: 'RIFT', cd: 30 } },
+    gun: { name: 'VOID ORBS', dmg: 50, rate: 0.5, mag: 8, reload: 1.7, spread: 0, pellets: 1, hs: 1.5, auto: true, zoom: 55, proj: { spd: 48, r: 0.9, size: 0.6 } }, q: { name: 'BLINK', cd: 10 }, e: { name: 'RIFT', cd: 30 } },
 ];
 const DRUGS = [
   { id: 'zoom', name: 'G-FUEL X', tag: 'ZOOMIES', sub: '+70% speed, +40% fire rate', col: '#19e3ff', dur: 10, dose: 28, cost: 60 },
@@ -1113,7 +1113,7 @@ const zones = [], pending = [];
 function ability() {
   const H = HEROES[me.hero]; if (me.qT > 0 || me.down > 0 || me.elim || me.chargeT > 0) return; me.qT = H.q.cd; me.ghT = 0; me.recallT = 0;
   if (H.id === 'sniper') { let fx = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0), fz = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0); if (!fx && !fz) fz = 1; const l = hyp(fx, fz); fx /= l; fz /= l; me.dashX = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx; me.dashZ = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.dashT = 0.28; me.vy = 4; SFX.dash(); me.critT = 3; toast('dive shot: your next shot is a piercing laser', 1.5); }
-  else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 42 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 38 * m, life: 4, tick: 0.5 }); }
+  else if (H.id === 'mage') { const res = castShot(camPos, camDir); const m = dmgMult(); boomAt(res.p.x, res.p.z, 7, 42 * m, 0xff6a1e, 0.5); zones.push({ x: res.p.x, z: res.p.z, r: 7, dps: 32 * m, life: 4, tick: 0.5 }); }
   else if (H.id === 'warper') {   // blink: 22 m where you aim, straight through anything in the way
     const l = hyp(camDir.x, camDir.z) || 1, o = { x: me.x + camDir.x / l * 22, z: me.z + camDir.z / l * 22 }, st = []; for (const v of views.values()) if (v.struct) st.push(v);
     pushOut(o, 0.9, st); fxBoom(me.x, 1.3, me.z, 3, 0xb98cff, 0.35); sendHost({ t: 'fx', x: me.x, z: me.z, r: 3, c: 0xb98cff, l: 0.35 });
@@ -1216,8 +1216,8 @@ function updateMe(dt, time) {
   if (me.chargeT > 0) {   // bull charge: locked in a straight line, flattening whatever it touches
     me.chargeT -= dt; me.x += me.chargeX * 40 * dt; me.z += me.chargeZ * 40 * dt; me.face = Math.atan2(me.chargeX, me.chargeZ);
     const m = dmgMult();
-    for (const v of views.values()) { if (v.team === me.team || v.hp <= 0 || v.fl & 1 || me.chargeHit.has(v.id)) continue; if (hyp(v.x - me.x, v.z - me.z) <= 2.6 + v.r) { me.chargeHit.add(v.id); hitEnt(v, 110 * m, false, _tv.set(v.x, v.h * 0.7, v.z)); } }
-    for (const pv of pviews.values()) { if (pv.tm === me.team || pv.s.st === 3 || pv.s.st === 5 || me.chargeHit.has(pv.pid)) continue; if (hyp(pv.x - me.x, pv.z - me.z) <= 3.2) { me.chargeHit.add(pv.pid); hitEnt(pv, 110 * m, false, _tv.set(pv.x, pv.y + 1.6, pv.z), [me.chargeX * 30, me.chargeZ * 30]); fxBoom(pv.x, 1.5, pv.z, 4, 0xd0a070, 0.3); } }
+    for (const v of views.values()) { if (v.team === me.team || v.hp <= 0 || v.fl & 1 || me.chargeHit.has(v.id)) continue; if (hyp(v.x - me.x, v.z - me.z) <= 2.6 + v.r) { me.chargeHit.add(v.id); hitEnt(v, 160 * m, false, _tv.set(v.x, v.h * 0.7, v.z)); } }
+    for (const pv of pviews.values()) { if (pv.tm === me.team || pv.s.st === 3 || pv.s.st === 5 || me.chargeHit.has(pv.pid)) continue; if (hyp(pv.x - me.x, pv.z - me.z) <= 3.2) { me.chargeHit.add(pv.pid); hitEnt(pv, 160 * m, false, _tv.set(pv.x, pv.y + 1.6, pv.z), [me.chargeX * 38, me.chargeZ * 38]); fxBoom(pv.x, 1.5, pv.z, 4, 0xd0a070, 0.3); } }
   }
   else if (me.dashT > 0) { me.dashT -= dt; me.x += me.dashX * 42 * dt; me.z += me.dashZ * 42 * dt; }
   else if (me.moving) { fx /= l; fz /= l; const wx = Math.sin(me.yaw) * fz - Math.cos(me.yaw) * fx, wz = Math.cos(me.yaw) * fz + Math.sin(me.yaw) * fx; me.x += wx * spd * dt; me.z += wz * spd * dt; if (me.shotT <= 0 && !me.ads) me.face = angLerp(me.face, Math.atan2(wx, wz), Math.min(1, dt * 12)); }
