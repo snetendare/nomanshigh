@@ -156,11 +156,11 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 24;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 25;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
-  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; then a 2 s charge with no shooting; after it your next shot within 3 s is a wide laser that pierces everything in its path for +40%). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
+  { id: 'sniper', name: '360 ANDY', model: 'sniper', hp: 140, spd: 9.6, col: 0xffe27a, desc: 'One-tap bolt rifle. Headshots x2.5. Noscopes are a coin flip. <b>Q: Dolphin Dive</b> (dash, no damage taken; then a 2 s charge with no shooting; after it your next shot within 3 s is a wide laser that pierces everything in its path: 150 to minions, 100 to players). <b>E: Ghillie</b> (5 s invisible, next shot +40%).',
     gun: { name: 'INTERVENTION', dmg: 95, rate: 0.95, mag: 5, reload: 2.0, spread: 0, pellets: 1, hs: 2.5, auto: false, zoom: 20 }, q: { name: 'DOLPHIN DIVE', cd: 5 }, e: { name: 'GHILLIE', cd: 25 } },
   { id: 'mage', name: 'THE PLUG', model: 'firemage', hp: 130, spd: 8.5, col: 0xff7a3d, desc: 'Full-auto fire bolts that take a moment to arrive, 40 round mag. <b>Q: Molotov</b> (burning ground where you aim). <b>E: Rocket Jump</b> (blast at your feet that launches you).',
     gun: { name: 'SPRAY N PRAY', dmg: 9, rate: 0.095, mag: 40, reload: 1.5, spread: 0.018, pellets: 1, hs: 1.6, auto: true, zoom: 50, proj: { spd: 110, r: 0.2, size: 0.22 } }, q: { name: 'MOLOTOV', cd: 10 }, e: { name: 'ROCKET JUMP', cd: 16 } },
@@ -1134,18 +1134,18 @@ function ability2() {
   else { me.chargeT = 0.55; me.chargeX = Math.sin(me.yaw); me.chargeZ = Math.cos(me.yaw); me.chargeHit = new Set(); toast('BULL CHARGE', 1); SFX.dash(); tone(90, 0.5, 'sawtooth', 0.12, 260); }
 }
 // The sniper's dive shot: a fat beam along the ground from where you stand, in the direction you aim. It takes LZ_CHARGE
-// seconds to charge after the dive (no shooting meanwhile), then hits every rival minion and player in its path for
-// LZ_MULT x a body shot and keeps going; only a rock, mushroom, bottle or building stops it.
-const LZ_CHARGE = 2, LZ_MULT = 1.4;
+// seconds to charge after the dive (no shooting meanwhile), then hits every rival minion in its path for LZ_MIN and every
+// rival player for LZ_PVP (both before levels and drugs) and keeps going; only a rock, mushroom, bottle or building stops it.
+const LZ_CHARGE = 2, LZ_MIN = 150, LZ_PVP = 100;
 function fireBeam(mult) {
-  const g = HEROES[me.hero].gun, l = hyp(camDir.x, camDir.z) || 1, dx = camDir.x / l, dz = camDir.z / l, R = 1.6, dmg = g.dmg * mult * LZ_MULT;
+  const g = HEROES[me.hero].gun, l = hyp(camDir.x, camDir.z) || 1, dx = camDir.x / l, dz = camDir.z / l, R = 1.6, dmg = LZ_MIN * mult, pdmg = LZ_PVP * mult / PVP;   // hitEnt scales player hits by PVP
   const along = o => (o.x - me.x) * dx + (o.z - me.z) * dz, off = o => Math.abs((o.x - me.x) * dz - (o.z - me.z) * dx);
   let end = 130, blocker = null;
   for (const b of OBST) { const pr = along(b); if (pr > 0 && off(b) < b.r && pr - b.r < end) { end = pr - b.r; blocker = null; } }
   for (const v of views.values()) { if (!v.struct || v.hp <= 0 || v.team === me.team) continue; const pr = along(v); if (pr > 0 && off(v) < v.r && pr - v.r < end) { end = pr - v.r; blocker = v; } }   // your own buildings do not stop it
   end = Math.max(2, end); let hits = 0;
   for (const v of views.values()) { if (v.struct || v.team === me.team || v.hp <= 0) continue; const pr = along(v); if (pr > 0 && pr < end + v.r && off(v) < v.r + R) { hitEnt(v, dmg, true, _tv.set(v.x, v.h * 0.7, v.z)); hits++; } }
-  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 3 || st === 5 || pv.tm === me.team) continue; const pr = along(pv); if (pr > 0 && pr < end + 1 && off(pv) < 0.85 * (pv.s.sc || 1) + R) { hitEnt(pv, dmg, true, _tv.set(pv.x, pv.y + 1.6, pv.z)); hits++; } }
+  for (const pv of pviews.values()) { const st = pv.s.st; if (st === 3 || st === 5 || pv.tm === me.team) continue; const pr = along(pv); if (pr > 0 && pr < end + 1 && off(pv) < 0.85 * (pv.s.sc || 1) + R) { hitEnt(pv, pdmg, true, _tv.set(pv.x, pv.y + 1.6, pv.z)); hits++; } }
   if (blocker && blocker.team !== me.team && !(blocker.fl & 1)) hitEnt(blocker, g.dmg * mult, false, _tv.set(blocker.x, 3, blocker.z));
   const y = me.y + 1.4 * me.scale, a = [me.x + dx * 1.2, y, me.z + dz * 1.2], b = [me.x + dx * end, y, me.z + dz * end];
   drawBeam(a, b); sendHost({ t: 'beam', a, b }); if (hits >= 3) toast('LASER: ' + hits + ' hit', 1.2);
