@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 29;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 30;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -281,7 +281,29 @@ const SFX = {
   take: () => { tone(200, 0.35, 'sawtooth', 0.1, 1400); noise(0.3, 0.06, 4000); },
   horn: () => { for (let b = 0; b < 3; b++) for (const f of [466, 470, 587, 698]) tone(f, b === 2 ? 0.55 : 0.14, 'sawtooth', 0.045, f * 0.97, b * 0.17); },
   boom: () => { tone(70, 0.9, 'sine', 0.5, 30); noise(0.5, 0.25, 500); },
-  hurt: () => tone(160, 0.12, 'sawtooth', 0.12, 80), reload: () => { tone(900, 0.03, 'square', 0.05); tone(600, 0.03, 'square', 0.05, 0, 0.12); },
+  hurt: () => tone(160, 0.12, 'sawtooth', 0.12, 80), // reload(k, dur): what you hear while the reload runs, spread over its length. loaded(k): the reload is done.
+  // cycle(k, dur): the bolt / pump being worked between two shots. ready(k): the gun can fire again.
+  reload: (k, dur) => {
+    if (k === 0) { noise(0.05, 0.14, 2500); tone(520, 0.04, 'square', 0.05, 300); noise(0.06, 0.2, 1800, dur * 0.55); tone(300, 0.05, 'square', 0.06, 440, dur * 0.55); }                       // mag out ... mag in
+    else if (k === 2) { for (let i = 0; i < 4; i++) { const d = dur * (0.08 + 0.2 * i); noise(0.045, 0.16, 2200, d); tone(680, 0.03, 'square', 0.04, 480, d); } }                              // four shells thumbed in
+    else if (k === 1) { tone(200, dur * 0.92, 'sawtooth', 0.03, 640); noise(dur * 0.85, 0.035, 5200); }                                                                                    // the fire building back up
+    else { tone(280, dur * 0.92, 'sine', 0.06, 880); tone(283, dur * 0.92, 'sine', 0.05, 890); }                                                                                           // the void humming back
+  },
+  loaded: k => {
+    if (k === 0) { noise(0.06, 0.2, 3000); noise(0.07, 0.24, 2000, 0.11); tone(1500, 0.05, 'triangle', 0.07, 0, 0.2); }       // bolt back, bolt forward, ting
+    else if (k === 2) { noise(0.08, 0.26, 1400); noise(0.09, 0.28, 1000, 0.13); }                                              // chk-chk
+    else if (k === 1) { tone(660, 0.08, 'triangle', 0.1, 990); tone(990, 0.12, 'triangle', 0.1, 0, 0.07); }
+    else { tone(600, 0.12, 'sine', 0.1, 1200); tone(1200, 0.16, 'sine', 0.07, 0, 0.1); }
+  },
+  cycle: (k, dur) => {
+    if (k === 0) { noise(0.05, 0.13, 3000, dur * 0.3); tone(700, 0.03, 'square', 0.03, 500, dur * 0.3); noise(0.06, 0.16, 2000, dur * 0.62); }   // bolt up and back, then home
+    else if (k === 2) { noise(0.07, 0.18, 1400, dur * 0.35); noise(0.08, 0.2, 1000, dur * 0.6); }                                                // pump
+  },
+  ready: k => {
+    if (k === 0) { tone(1800, 0.035, 'triangle', 0.07); noise(0.025, 0.1, 4000); }
+    else if (k === 2) { noise(0.04, 0.12, 1600); tone(900, 0.03, 'triangle', 0.05); }
+    else tone(1400, 0.05, 'sine', 0.05, 1800);
+  },
   expl: () => { noise(0.6, 0.35, 700); tone(90, 0.5, 'sine', 0.35, 30); }, dash: () => noise(0.2, 0.12, 5000),
 };
 
@@ -1096,11 +1118,12 @@ function rayHit(o, d, tmin, tmax, pad, team) {
 // the instant shot from the crosshair. range: how far from the player it reaches (none = across the map)
 function castShot(o, d, range) { const r = rayHit(o, d, camLen * 0.85, range ? camLen + range : 420, 0, me.team); r.dist = Math.max(0, r.t - camLen); return r; }
 function muzzle() { return new THREE.Vector3(me.x - Math.cos(me.yaw) * 0.5 * me.scale + Math.sin(me.yaw) * 0.9, me.y + 1.45 * me.scale, me.z + Math.sin(me.yaw) * 0.5 * me.scale + Math.cos(me.yaw) * 0.9); }
-function reload() { const H = HEROES[me.hero]; if (me.reloadT > 0 || me.ammo >= H.gun.mag) return; me.reloadT = H.gun.reload / (fxOn('zoom') ? 1.4 : 1); SFX.reload(); }
+function reload() { const H = HEROES[me.hero]; if (me.reloadT > 0 || me.ammo >= H.gun.mag) return; me.reloadT = H.gun.reload / (fxOn('zoom') ? 1.4 : 1); SFX.reload(me.hero, me.reloadT); }
+const READY_MIN = 0.4;   // guns slower than this between shots get the bolt / pump and the ready sound
 function tryFire() {
   const H = HEROES[me.hero], g = H.gun; if (me.reloadT > 0 || me.fireT > 0 || me.down > 0 || me.chargeT > 0 || me.lzC > 0) return;   // lzC: the dive laser is charging, no shots at all
   if (me.ammo <= 0) { reload(); return; }
-  me.fireT = g.rate / (fxOn('zoom') ? 1.4 : 1); if (me.combo < 4) me.ammo--; me.shotT = 0.3; me.recallT = 0; SFX.shot(me.hero);
+  me.fireT = g.rate / (fxOn('zoom') ? 1.4 : 1); if (me.combo < 4) me.ammo--; me.shotT = 0.3; me.recallT = 0; SFX.shot(me.hero); if (g.rate >= READY_MIN && me.ammo > 0) SFX.cycle(me.hero, me.fireT);
   let mult = dmgMult(); if (me.ghT > 0) { mult *= 1.4; me.ghT = 0; toast('ambush: +40%', 1); }
   const crit = me.critT > 0; me.critT = 0;
   if (crit && H.id === 'sniper') { fireBeam(mult); me.recoil = Math.min(0.12, me.recoil + 0.045); return true; }
@@ -1188,9 +1211,10 @@ function updateMe(dt, time) {
   if (!me.ready) return;
   if (me.elim) { if ((netT -= dt) <= 0) { netT = 0.25; sendState(5); } return; }
   // timers
-  me.fireT -= dt; me.shotT -= dt; me.qT -= dt; me.eT -= dt; me.multiT -= dt; me.hurtT -= dt; me.safeT -= dt; me.ghT -= dt; me.regenT -= dt; me.critT -= dt; me.waterT -= dt;
+  { const was = me.fireT > 0; me.fireT -= dt; if (was && me.fireT <= 0 && me.reloadT <= 0 && me.ammo > 0 && me.down <= 0 && me.lzC <= 0 && HEROES[me.hero].gun.rate >= READY_MIN) SFX.ready(me.hero); }   // the gun can fire again
+  me.shotT -= dt; me.qT -= dt; me.eT -= dt; me.multiT -= dt; me.hurtT -= dt; me.safeT -= dt; me.ghT -= dt; me.regenT -= dt; me.critT -= dt; me.waterT -= dt;
   if (me.lzC > 0 && (me.lzC -= dt) <= 0 && me.down <= 0) { toast('LASER READY', 1); tone(1500, 0.18, 'square', 0.08, 1900); if (me.ghT <= 0) { fxBoom(me.x, 1.4, me.z, 2.2, 0x35e8ff, 0.3); sendHost({ t: 'fx', x: me.x, z: me.z, r: 2.2, c: 0x35e8ff, l: 0.3 }); } }
-  if (me.reloadT > 0 && (me.reloadT -= dt) <= 0) me.ammo = g.mag;
+  if (me.reloadT > 0 && (me.reloadT -= dt) <= 0) { me.ammo = g.mag; if (me.down <= 0) SFX.loaded(me.hero); }
   if (G.st && !G.ov) { addCoins(1.2 * dt); if (me.behind > 0) gainXp(0.6 * me.behind * dt); }   // and a slow free trickle of XP while behind
   // substances
   let act = 0;
@@ -1421,7 +1445,7 @@ function start(asHost) {
   else joinPeer(code);
   running = true; last = performance.now(); requestAnimationFrame(frame);
   if (!AUTO) lockPtr();
-  window.DBG = { me, views, pviews, keys, setHero, PADS, hud: updateHud, projs, rifts, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
+  window.DBG = { sfx: SFX, me, views, pviews, keys, setHero, PADS, hud: updateHud, projs, rifts, send: sendHost, hit(id, d) { hitEnt(views.get(id), d, false); }, get camLen() { return camLen; }, click() { firing = true; me.fireBuf = 0.3; },
     step(n = 1, dt = 1 / 60) { for (let i = 0; i < n; i++) { const time = performance.now() / 1000 + i * dt; updateMe(dt, time); updateViews(dt, time); updateFx(dt); updateCam(dt, time); } renderer.render(scene, camera); }, get S() { return S; }, get G() { return G; }, get others() { return others; }, conns };
 }
 $('bMode').onclick = () => { selMode = selMode === 3 ? 2 : 3; $('bMode').textContent = 'MODE: ' + (selMode === 2 ? '1v1' : '1v1v1'); };
