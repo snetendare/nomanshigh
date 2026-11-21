@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 25;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 26;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -534,6 +534,8 @@ function spawnLane(team, goal, t, o = {}, L) {   // L: which lane to take (picke
   const dx = g.x - b.x, dz = g.z - b.z, l = hyp(dx, dz), e = spawn(t, team, b.x + dx / l * 13 + rnd(-3, 3), b.z + dz / l * 13 + rnd(-3, 3), { goal, ox: rnd(-4, 4), ...o });
   e.via = via && via.length ? via : null; return e;
 }
+// a player standing inside their own base ring, stash still up: spiders cannot see or reach them there
+function homeSafe(p) { const B = BASES[p.tm]; return !!B && coreOf(p.tm).hp > 0 && hyp(p.x - B.x, p.z - B.z) < BASE_R; }
 function spawnHunter(x, z, k) { const a = rnd(6.28), o = { x: x + Math.sin(a) * 30, z: z + Math.cos(a) * 30 }; pushOut(o, 1.5); spawn('spd', NEU, o.x, o.z, { hunt: 1, hpk: k }); }
 function dropPick(x, z, k) { const o = { x: x + rnd(-1.5, 1.5), z: z + rnd(-1.5, 1.5) }; pushOut(o, 1); const p = { id: S.nid++, k: k ?? Math.floor(Math.random() * DRUGS.length), x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); if (S.picks.size > 40) S.picks.delete(S.picks.keys().next().value); }
 function damageEnt(e, dmg, by, hs) { if (e.inv || e.hp <= 0) return; e.hp -= dmg; if (by) { e.last = by; e.lastHs = hs ? 1 : 0; } }
@@ -683,7 +685,7 @@ function hostTick(dt) {
     const sc = e.big ? 1.6 : 1, neu = e.team === NEU, aggro = d.struct ? d.rng : e.hunt ? 999 : Math.max(16, d.rng + 2);
     let tgt = null, tp = null, bs = 1e9, tr = 0;
     if (!neu) for (const o of arr) { if (o.hp <= 0 || o.team === e.team || o.team === NEU || o.inv) continue; const rr = ET[o.t].r, dd = hyp(o.x - e.x, o.z - e.z) - rr; if (dd < aggro && dd < bs) { bs = dd; tgt = o; tp = null; tr = rr; } }
-    for (const p of plist) { if (p.tm === e.team || p.gh) continue; if (e.leash && hyp(p.x - e.hx, p.z - e.hz) > e.leash) continue; const dd = hyp(p.x - e.x, p.z - e.z), s = dd + (d.struct ? 9 : 0); if (dd < (d.struct ? TWP : aggro) && s < bs) { bs = s; tgt = p; tp = p; tr = 0.6; } }
+    for (const p of plist) { if (p.tm === e.team || p.gh) continue; if (e.t === 'spd' && homeSafe(p)) continue; if (e.leash && hyp(p.x - e.hx, p.z - e.hz) > e.leash) continue; const dd = hyp(p.x - e.x, p.z - e.z), s = dd + (d.struct ? 9 : 0); if (dd < (d.struct ? TWP : aggro) && s < bs) { bs = s; tgt = p; tp = p; tr = 0.6; } }
     if (tgt) {
       const dx = tgt.x - e.x, dz = tgt.z - e.z, dd = hyp(dx, dz) || 0.01; e.yaw = Math.atan2(dx, dz);
       const reach = d.struct && tp ? TWP : d.rng * sc + tr + d.r * sc * 0.6;
@@ -707,6 +709,9 @@ function hostTick(dt) {
       }
     }
     if (!d.struct) pushOut(e, d.r * sc * 0.8, structs);
+    if (e.t === 'spd') for (let t = 0; t < NT; t++) {   // spiders stay out of every base that still has its stash
+      if (coreOf(t).hp <= 0) continue; const B = BASES[t], bx = e.x - B.x, bz = e.z - B.z, bd = hyp(bx, bz) || 0.01, m = BASE_R + d.r; if (bd < m) { e.x = B.x + bx / bd * m; e.z = B.z + bz / bd * m; }
+    }
     if (!d.struct && !neu && S.rifts.length) { e.rcd = (e.rcd || 0) - dt; if (e.rcd <= 0) for (const R of S.rifts) if (R.team === e.team && hyp(e.x - R.a[0], e.z - R.a[1]) < 3.4) { e.x = R.b[0] + rnd(-2, 2); e.z = R.b[1] + rnd(-2, 2); e.via = null; e.rcd = 4; break; } }
   }
   for (let i = 0; i < arr.length; i++) { const a = arr[i]; if (ET[a.t].struct || a.hp <= 0) continue; for (let j = i + 1; j < arr.length; j++) { const b = arr[j]; if (ET[b.t].struct || b.hp <= 0) continue; const dx = b.x - a.x, dz = b.z - a.z, d = hyp(dx, dz), m = (ET[a.t].r + ET[b.t].r) * 0.85; if (d < m && d > 1e-3) { const k = (m - d) / d * 0.5; a.x -= dx * k; a.z -= dz * k; b.x += dx * k; b.z += dz * k; } } }
