@@ -133,7 +133,7 @@ button.alt{background:#19e3ff;border-color:#19e3ff}
     <b>LEVELS:</b> +6% damage and +8 HP each, shown on everyone's name. Higher level = bigger bounty. Three levels ahead of the lowest and you get a crown and show on every map.<br>
     <b>THE LAB:</b> be the only colour in the middle circle (minions count) to capture it: a batch on capture, then coins for as long as you stand in it.<br>
     <b>RANGE:</b> towers and stashes only take damage from inside their ring, and towers shoot players inside it.<br>
-    <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 20 s every 4 minutes (and all through warmup).<br>
+    <b>RAMPS:</b> launch ramps, bounce pads and speed gates switch on for 45 s every 2 minutes (and all through warmup).<br>
     <b>COMEBACK:</b> you level faster the further you are behind the top level (+30% XP per level, plus a slow free trickle), and the leader levels slower. You can shop while dead.<br>
     <b>AURAS:</b> everyone can see what you are on: one dot circles your head per active substance, in its slot colour (cyan G-Fuel, pink Shrooms, green Copium, brown Brownie, blue Water). The same dots show in the player list.<br>
     <b>MODES:</b> the host picks 1v1v1 (triangle, a lane between every pair) or 1v1 (two lanes around the lab). Joiners get whatever the host picked.<br>
@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 30;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 31;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -196,6 +196,7 @@ const ET = {
   co: { h: 9, r: 6, hp: 2600, xp: 300, c: 0, struct: 1, nm: 'STASH' },
 };
 const LV_DMG = 0.06, LV_HP = 8;   // what one level is worth: +6% damage, +8 max HP (was 10% and 12)
+const RAMP_ON = 45, RAMP_EVERY = 120;   // the movement toys: seconds online, and seconds from one switch-on to the next
 const WATER_CD = 12;   // seconds between two waters
 const NEU = 3, PVP = 0.6, SR = 34, TWP = SR, BASE_R = 24, SUDDEN = 900;
 const HUE = { gob: [0.33, -0.25, 0, 0], arc: [0, 0.4, -0.3, 0], spd: [0, 0, 0, 0], nec: [0, 0, 0, 0], mam: [0, 0.4, -0.3, 0.85] };
@@ -236,7 +237,7 @@ function setLayout(n) {
     STRUCTS.push(['co', i, BASES[i].x, BASES[i].z]);
     for (const L of lanesOf(i)) { const r = laneRoute(L, i), p2 = along(r, 27), p1 = along(r, 66); STRUCTS.push(['t2', i, p2.x - p2.dz * 7, p2.z + p2.dx * 7]); STRUCTS.push(['tw', i, p1.x - p1.dz * 7, p1.z + p1.dx * 7]); }
   }
-  // movement toys: on in warmup, then for 20 s every 4 minutes. k: 0 launch ramp (along dx,dz), 1 bounce pad, 2 speed gate
+  // movement toys: on in warmup, then for RAMP_ON s every RAMP_EVERY s. k: 0 launch ramp (along dx,dz), 1 bounce pad, 2 speed gate
   for (let i = 0; i < NT; i++) {
     const b = BASES[i], l = hyp(b.x, b.z), cx = -b.x / l, cz = -b.z / l;      // out of each base, toward the lab
     PADS.push({ k: 0, x: b.x + cx * 30, z: b.z + cz * 30, dx: cx, dz: cz }, { k: 2, x: b.x + cx * 52, z: b.z + cz * 52, dx: cx, dz: cz }, { k: 0, x: b.x + cx * 74, z: b.z + cz * 74, dx: cx, dz: cz });
@@ -536,7 +537,7 @@ function joinPeer(code) {
 function hostReset() {
   const players = {}, teamOf = { host: 0 };
   if (S) for (const k in S.teamOf) if (!isBot(k)) { teamOf[k] = S.teamOf[k]; if (S.players[k]) players[k] = S.players[k]; }
-  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: Array(NT).fill(true), rampT: 240, rampOn: 0, ring: 0,
+  S = { time: 0, started: false, over: 0, ents: new Map(), picks: new Map(), nid: 1, waveT: 2, wave: 0, huntT: 45, careT: 40, bossT: 200, boss: 0, necT: 90, sudden: false, wasAlive: Array(NT).fill(true), rampT: RAMP_EVERY, rampOn: 0, ring: 0,
     rifts: [], lab: { p: 0, tm: -1, own: -1, sp: 0, payT: 0, bcd: 0 }, camps: CAMPS.map(c => ({ ...c, alive: 0, resp: 0 })), players, teamOf, bots: {}, st: [] };
   for (const [t, team, x, z] of STRUCTS) S.st.push(spawn(t, team, x, z));
   S.camps.forEach((c, i) => spawnCamp(i));
@@ -672,8 +673,8 @@ function hostTick(dt) {
     if ((S.careT -= dt) <= 0) { S.careT = 60; const a = rnd(6.28), d = rnd(14, 48), o = { x: Math.sin(a) * d, z: Math.cos(a) * d }; pushOut(o, 2); const p = { id: S.nid++, k: 9, x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); emit({ t: 'ann', m: 'CARE PACKAGE INBOUND', s: 'near the middle. first come first served.', c: '#19e3ff' }); }
     if (!S.sudden && S.time > SUDDEN) { S.sudden = true; emit({ t: 'ann', m: 'SUDDEN DEATH', s: 'every stash is on fire.', c: '#ff3b3b', horn: 1 }); }
     if (S.sudden) for (let t = 0; t < NT; t++) { const c = coreOf(t); if (c.hp > 0) c.hp -= 25 * dt; }
-    if (S.rampOn > 0) { if ((S.rampOn -= dt) <= 0) { S.rampOn = 0; emit({ t: 'toast', m: 'ramps offline. back in 4 minutes.' }); } }
-    else if ((S.rampT -= dt) <= 0) { S.rampT = 220; S.rampOn = 20; emit({ t: 'ann', m: 'RAMPS ONLINE', s: '20 seconds of launch ramps, bounce pads and speed gates. send it.', c: '#ff8a1e', horn: 1 }); }
+    if (S.rampOn > 0) { if ((S.rampOn -= dt) <= 0) { S.rampOn = 0; emit({ t: 'toast', m: 'ramps offline. back in ' + (RAMP_EVERY - RAMP_ON) + ' seconds.' }); } }
+    else if ((S.rampT -= dt) <= 0) { S.rampT = RAMP_EVERY - RAMP_ON; S.rampOn = RAMP_ON; emit({ t: 'ann', m: 'RAMPS ONLINE', s: RAMP_ON + ' seconds of launch ramps, bounce pads and speed gates. send it.', c: '#ff8a1e', horn: 1 }); }
     // closing ring: once no stash is left, the play area shrinks onto the lab
     if (!S.ring && teamIds().every(t => coreOf(t).hp <= 0)) { S.ring = ARENA; emit({ t: 'ann', m: 'THE RING IS CLOSING', s: 'no stashes left. get to the middle or burn.', c: '#ff3b3b', horn: 1 }); }
     if (S.ring) S.ring = Math.max(16, S.ring - 2.6 * dt);
