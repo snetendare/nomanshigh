@@ -156,7 +156,7 @@ const hyp = Math.hypot;
 function mulberry(s) { return () => { s |= 0; s = s + 0x6D2B79F5 | 0; let t = Math.imul(s ^ s >>> 15, 1 | s); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const Q = new URLSearchParams(location.search);
 const AUTO = Q.get('auto') === '1';
-const BUILD = 28;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
+const BUILD = 29;   // bump on every publish: shown in the lobby, and host/client builds are compared on join
 
 // ============================== data
 const HEROES = [
@@ -196,6 +196,7 @@ const ET = {
   co: { h: 9, r: 6, hp: 2600, xp: 300, c: 0, struct: 1, nm: 'STASH' },
 };
 const LV_DMG = 0.06, LV_HP = 8;   // what one level is worth: +6% damage, +8 max HP (was 10% and 12)
+const WATER_CD = 12;   // seconds between two waters
 const NEU = 3, PVP = 0.6, SR = 34, TWP = SR, BASE_R = 24, SUDDEN = 900;
 const HUE = { gob: [0.33, -0.25, 0, 0], arc: [0, 0.4, -0.3, 0], spd: [0, 0, 0, 0], nec: [0, 0, 0, 0], mam: [0, 0.4, -0.3, 0.85] };
 const TEAMS = [{ n: 'BLUE', c: '#3fa7ff', h: 0x3fa7ff }, { n: 'RED', c: '#ff4d4d', h: 0xff4d4d }, { n: 'GREEN', c: '#57e06a', h: 0x57e06a }, { n: 'NARCS', c: '#c9a0ff', h: 0xc9a0ff }];
@@ -473,7 +474,7 @@ let worldBuilt = false;   // the host builds the map for its chosen mode; a join
 const me = { id: 'host', team: 0, ready: false, name: 'PLAYER', hero: 0, x: 0, y: 0, z: -90, vy: 0, yaw: 0, pitch: 0, face: 0, hp: 100, mhp: 100, shield: 0, ammo: 0, reloadT: 0, fireT: 0, shotT: 0, qT: 0, eT: 0, dashT: 0, dashX: 0, dashZ: 0,
   down: 0, downKind: '', willElim: false, elim: false, safeT: 0, lastBy: '', lastByT: 0, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], fxMax: [1, 1, 1, 1, 1], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0,
   strike: 0, nuke: 0, scale: 1, ads: false, ground: true, hurtT: 0, multi: 0, multiT: 0, moving: false, inst: null, recoil: 0, fireBuf: 0, kx: 0, kz: 0, padT: 0, boostT: 0,
-  ghT: 0, critT: 0, lzC: 0, behind: 0, lead: 0, chargeT: 0, chargeX: 0, chargeZ: 0, chargeHit: null, recallT: 0, regenT: 0, shop: false, shopTgt: 0, fed: false, under: false, ring: null };
+  ghT: 0, critT: 0, lzC: 0, waterT: 0, behind: 0, lead: 0, chargeT: 0, chargeX: 0, chargeZ: 0, chargeHit: null, recallT: 0, regenT: 0, shop: false, shopTgt: 0, fed: false, under: false, ring: null };
 const keys = {}; let firing = false, locked = false;
 const fxOn = id => me.fx[DI[id]] > 0;
 const isBot = id => typeof id === 'string' && id.startsWith('bot');
@@ -534,7 +535,7 @@ function spawnLane(team, goal, t, o = {}, L) {   // L: which lane to take (picke
   const dx = g.x - b.x, dz = g.z - b.z, l = hyp(dx, dz), e = spawn(t, team, b.x + dx / l * 13 + rnd(-3, 3), b.z + dz / l * 13 + rnd(-3, 3), { goal, ox: rnd(-4, 4), ...o });
   e.via = via && via.length ? via : null; return e;
 }
-// a player standing inside their own base ring, stash still up: spiders cannot see or reach them there
+// a player standing inside their own base ring, stash still up: spiders cannot bite them there
 function homeSafe(p) { const B = BASES[p.tm]; return !!B && coreOf(p.tm).hp > 0 && hyp(p.x - B.x, p.z - B.z) < BASE_R; }
 function spawnHunter(x, z, k) { const a = rnd(6.28), o = { x: x + Math.sin(a) * 30, z: z + Math.cos(a) * 30 }; pushOut(o, 1.5); spawn('spd', NEU, o.x, o.z, { hunt: 1, hpk: k }); }
 function dropPick(x, z, k) { const o = { x: x + rnd(-1.5, 1.5), z: z + rnd(-1.5, 1.5) }; pushOut(o, 1); const p = { id: S.nid++, k: k ?? Math.floor(Math.random() * DRUGS.length), x: +o.x.toFixed(1), z: +o.z.toFixed(1) }; S.picks.set(p.id, p); if (S.picks.size > 40) S.picks.delete(S.picks.keys().next().value); }
@@ -685,10 +686,10 @@ function hostTick(dt) {
     const sc = e.big ? 1.6 : 1, neu = e.team === NEU, aggro = d.struct ? d.rng : e.hunt ? 999 : Math.max(16, d.rng + 2);
     let tgt = null, tp = null, bs = 1e9, tr = 0;
     if (!neu) for (const o of arr) { if (o.hp <= 0 || o.team === e.team || o.team === NEU || o.inv) continue; const rr = ET[o.t].r, dd = hyp(o.x - e.x, o.z - e.z) - rr; if (dd < aggro && dd < bs) { bs = dd; tgt = o; tp = null; tr = rr; } }
-    for (const p of plist) { if (p.tm === e.team || p.gh) continue; if (e.t === 'spd' && homeSafe(p)) continue; if (e.leash && hyp(p.x - e.hx, p.z - e.hz) > e.leash) continue; const dd = hyp(p.x - e.x, p.z - e.z), s = dd + (d.struct ? 9 : 0); if (dd < (d.struct ? TWP : aggro) && s < bs) { bs = s; tgt = p; tp = p; tr = 0.6; } }
+    for (const p of plist) { if (p.tm === e.team || p.gh) continue; if (e.leash && hyp(p.x - e.hx, p.z - e.hz) > e.leash) continue; const dd = hyp(p.x - e.x, p.z - e.z), s = dd + (d.struct ? 9 : 0); if (dd < (d.struct ? TWP : aggro) && s < bs) { bs = s; tgt = p; tp = p; tr = 0.6; } }
     if (tgt) {
       const dx = tgt.x - e.x, dz = tgt.z - e.z, dd = hyp(dx, dz) || 0.01; e.yaw = Math.atan2(dx, dz);
-      const reach = d.struct && tp ? TWP : d.rng * sc + tr + d.r * sc * 0.6;
+      const reach = d.struct && tp ? TWP : e.t === 'spd' && tp && homeSafe(tp) ? 0 : d.rng * sc + tr + d.r * sc * 0.6;   // a spider cannot bite across a base ring: it has to walk in, and dies there
       if (dd > reach) { if (!d.struct) { e.x += dx / dd * d.spd * dt; e.z += dz / dd * d.spd * dt; e.st = 1; } else e.st = 0; }
       else {
         e.st = 2;
@@ -713,8 +714,8 @@ function hostTick(dt) {
       }
     }
     if (!d.struct) pushOut(e, d.r * sc * 0.8, structs);
-    if (e.t === 'spd') for (let t = 0; t < NT; t++) {   // spiders stay out of every base that still has its stash
-      if (coreOf(t).hp <= 0) continue; const B = BASES[t], bx = e.x - B.x, bz = e.z - B.z, bd = hyp(bx, bz) || 0.01, m = BASE_R + d.r; if (bd < m) { e.x = B.x + bx / bd * m; e.z = B.z + bz / bd * m; }
+    if (e.t === 'spd') for (let t = 0; t < NT; t++) {   // a spider that sets foot inside a base that still has its stash dies on the spot (nobody gets the kill)
+      if (coreOf(t).hp > 0 && hyp(e.x - BASES[t].x, e.z - BASES[t].z) < BASE_R) { e.hp = 0; e.last = null; break; }
     }
     if (!d.struct && !neu && S.rifts.length) { e.rcd = (e.rcd || 0) - dt; if (e.rcd <= 0) for (const R of S.rifts) if (R.team === e.team && hyp(e.x - R.a[0], e.z - R.a[1]) < 3.4) { e.x = R.b[0] + rnd(-2, 2); e.z = R.b[1] + rnd(-2, 2); e.via = null; e.rcd = 4; break; } }
   }
@@ -982,10 +983,10 @@ function onPKill(ev) {
 }
 function onKill(ev) {
   const d = ET[ev.et], tower = ev.et === 'tw' || ev.et === 't2';
-  if (tower) { feed('<span style="color:' + TEAMS[ev.team].c + '">' + TEAMS[ev.team].n + (ev.et === 't2' ? ' T2' : ' T1') + '</span> fell' + (ev.by ? ' to ' + tagOf(ev.by) : '')); if (ev.team === me.team) banner("IT'S SO OVER", ev.et === 't2' ? 'you lost a T2. your stash can be hit now.' : 'you lost a T1. the T2 behind it is exposed.', false, '#ff3b3b'); }
+  if (tower) { feed('<span style="color:' + TEAMS[ev.team].c + '">' + TEAMS[ev.team].n + (ev.et === 't2' ? ' T2' : ' T1') + '</span> fell' + (ev.by ? ' to ' + tagOf(ev.by) : '')); if (ev.team === me.team) banner("IT'S SO OVER", ev.et === 't2' ? 'you lost a T2. your stash opens once every tower is down.' : 'you lost a T1. the T2 behind it is exposed.', false, '#ff3b3b'); }
   if (ev.by !== me.id || ev.team === me.team) return;
   gainXp(d.xp * (ev.big ? 2 : 1)); if (ev.c) addCoins(ev.c);
-  if (tower) { banner("WE'RE SO BACK", TEAMS[ev.team].n + (ev.et === 't2' ? ' stash is exposed' : ' T2 is exposed') + ' &middot; +' + ev.c + ' coins', true, '#9dff6a'); addStreak(2); return; }
+  if (tower) { banner("WE'RE SO BACK", TEAMS[ev.team].n + (ev.et === 't2' ? ' T2 is down' : ' T2 is exposed') + ' &middot; +' + ev.c + ' coins', true, '#9dff6a'); addStreak(2); return; }
   if (ev.et === 'co') return;
   if (ev.et === 'nec' || ev.et === 'mam') feed(tagOf(ev.by) + ' deleted <span style="color:#c9a0ff">' + d.nm + '</span>');
   me.kills++; addStreak(1); me.multi = me.multiT > 0 ? me.multi + 1 : 1; me.multiT = 2.6;
@@ -1004,7 +1005,7 @@ function gotPick(k) {
 // ============================== CLIENT: me
 function spawnPos(tm) { const b = BASES[tm], l = hyp(b.x, b.z); return { x: b.x - b.x / l * 15 + rnd(-4, 4), z: b.z - b.z / l * 15 + rnd(-4, 4), yaw: Math.atan2(-b.x, -b.z) }; }
 function resetMe() {
-  const H = HEROES[me.hero], sp = spawnPos(me.team); Object.assign(me, { x: sp.x, y: 0, z: sp.z, vy: 0, yaw: sp.yaw, face: sp.yaw, pitch: 0, hp: H.hp, mhp: H.hp, shield: 0, ammo: H.gun.mag, reloadT: 0, fireT: 0, qT: 0, eT: 0, dashT: 0, down: 0, willElim: false, elim: false, safeT: 3, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0, strike: 0, nuke: 0, scale: 1, kx: 0, kz: 0, padT: 0, boostT: 0, ghT: 0, critT: 0, lzC: 0, chargeT: 0, recallT: 0, regenT: 0, shop: false });
+  const H = HEROES[me.hero], sp = spawnPos(me.team); Object.assign(me, { x: sp.x, y: 0, z: sp.z, vy: 0, yaw: sp.yaw, face: sp.yaw, pitch: 0, hp: H.hp, mhp: H.hp, shield: 0, ammo: H.gun.mag, reloadT: 0, fireT: 0, qT: 0, eT: 0, dashT: 0, down: 0, willElim: false, elim: false, safeT: 3, kills: 0, pk: 0, streak: 0, deaths: 0, lvl: 1, xp: 0, coins: 80, inv: [1, 0, 1, 0, 1], fx: [0, 0, 0, 0, 0], tol: [0, 0, 0, 0, 0], pend: [], high: 0, comedown: 0, combo: 0, strike: 0, nuke: 0, scale: 1, kx: 0, kz: 0, padT: 0, boostT: 0, ghT: 0, critT: 0, lzC: 0, waterT: 0, chargeT: 0, recallT: 0, regenT: 0, shop: false });
   $('center').style.display = 'none';
   if (me.inst) { if (me.ring) me.inst.g.remove(me.ring); me.ring = teamRing(me.inst, me.team); }
 }
@@ -1022,7 +1023,7 @@ function myCoreAlive() { return coreHp(me.team) > 0; }
 function inBase() { const b = BASES[me.team]; return myCoreAlive() && hyp(me.x - b.x, me.z - b.z) < BASE_R; }
 function takeDrug(k) {
   if (me.down > 0 || me.elim || me.inv[k] <= 0 || G.ov) return; const D = DRUGS[k];
-  if (D.instant) { if (me.hp >= me.mhp) { toast('already at full HP'); return; } me.inv[k]--; SFX.take(); me.hp = Math.min(me.mhp, me.hp + me.mhp * 0.4); me.regenT = 5; me.high = Math.max(0, me.high - 30); banner(D.tag, D.sub, false, D.col); return; }
+  if (D.instant) { if (me.waterT > 0) { toast('still swallowing: water again in ' + Math.ceil(me.waterT) + ' s', 1); return; } if (me.hp >= me.mhp) { toast('already at full HP'); return; } me.waterT = WATER_CD; me.inv[k]--; SFX.take(); me.hp = Math.min(me.mhp, me.hp + me.mhp * 0.4); me.regenT = 5; me.high = Math.max(0, me.high - 30); banner(D.tag, D.sub, false, D.col); return; }
   me.inv[k]--; SFX.take();
   if (D.delay) { me.pend.push({ k, t: D.delay }); toast("bro these edibles ain't sh*t..."); return; }
   applyDrug(k);
@@ -1187,7 +1188,7 @@ function updateMe(dt, time) {
   if (!me.ready) return;
   if (me.elim) { if ((netT -= dt) <= 0) { netT = 0.25; sendState(5); } return; }
   // timers
-  me.fireT -= dt; me.shotT -= dt; me.qT -= dt; me.eT -= dt; me.multiT -= dt; me.hurtT -= dt; me.safeT -= dt; me.ghT -= dt; me.regenT -= dt; me.critT -= dt;
+  me.fireT -= dt; me.shotT -= dt; me.qT -= dt; me.eT -= dt; me.multiT -= dt; me.hurtT -= dt; me.safeT -= dt; me.ghT -= dt; me.regenT -= dt; me.critT -= dt; me.waterT -= dt;
   if (me.lzC > 0 && (me.lzC -= dt) <= 0 && me.down <= 0) { toast('LASER READY', 1); tone(1500, 0.18, 'square', 0.08, 1900); if (me.ghT <= 0) { fxBoom(me.x, 1.4, me.z, 2.2, 0x35e8ff, 0.3); sendHost({ t: 'fx', x: me.x, z: me.z, r: 2.2, c: 0x35e8ff, l: 0.3 }); } }
   if (me.reloadT > 0 && (me.reloadT -= dt) <= 0) me.ammo = g.mag;
   if (G.st && !G.ov) { addCoins(1.2 * dt); if (me.behind > 0) gainXp(0.6 * me.behind * dt); }   // and a slow free trickle of XP while behind
@@ -1325,7 +1326,7 @@ function updateHud(time) {
   $('hib').firstElementChild.style.width = clamp(me.high, 0, 100) + '%'; $('hin').textContent = TIERS.find(t => me.high < t[0])[1]; $('hiv').textContent = Math.round(me.high) + '% high · +' + Math.round((dmgMult() - 1) * 100) + '% dmg';
   $('ammo').textContent = me.reloadT > 0 ? 'RELOADING' : me.combo >= 4 ? '∞' : me.ammo + ' / ' + H.gun.mag; $('ammo').style.fontSize = me.reloadT > 0 ? '26px' : '44px'; $('gun').textContent = H.name + ' · ' + H.gun.name;
   $('abil').innerHTML = '<b>Q</b> ' + H.q.name + (me.qT > 0 ? ' ' + me.qT.toFixed(1) + 's' : ' READY') + (me.lzC > 0 ? ' <span style="color:#ff9d3d">CHARGING ' + me.lzC.toFixed(1) + 's</span>' : me.critT > 0 ? ' <span style="color:#35e8ff">LASER SHOT ' + me.critT.toFixed(1) + 's</span>' : '') + '<br><b>E</b> ' + H.e.name + (me.ghT > 0 ? ' ACTIVE ' + me.ghT.toFixed(1) + 's' : me.eT > 0 ? ' ' + Math.ceil(me.eT) + 's' : ' READY') + '<br><b>B</b> recall &middot; <b>F</b> shop';
-  for (let i = 0; i < 5; i++) { const s = $('sl' + i); $('sc' + i).textContent = me.fx[i] > 0 ? me.fx[i].toFixed(0) + 's' : 'x' + me.inv[i]; s.classList.toggle('on', me.fx[i] > 0); s.classList.toggle('zero', me.inv[i] <= 0 && me.fx[i] <= 0); $('stt' + i).style.width = (me.fx[i] > 0 ? me.fx[i] / me.fxMax[i] * 100 : 0) + '%'; }
+  for (let i = 0; i < 5; i++) { const s = $('sl' + i); $('sc' + i).textContent = me.fx[i] > 0 ? me.fx[i].toFixed(0) + 's' : DRUGS[i].instant && me.waterT > 0 ? Math.ceil(me.waterT) + 's' : 'x' + me.inv[i]; s.classList.toggle('on', me.fx[i] > 0); s.classList.toggle('zero', me.inv[i] <= 0 && me.fx[i] <= 0); $('stt' + i).style.width = (me.fx[i] > 0 ? me.fx[i] / me.fxMax[i] * 100 : 0) + '%'; }
   $('streak').innerHTML = (me.fed ? '\u{1F451} YOU ARE FED: everyone can see you<br>' : '') + (me.behind > 0 ? 'catching up: +' + Math.round((xpScale() - 1) * 100) + '% XP' + (me.under ? ', +25% coins' : '') + '<br>' : me.lead > 0 ? 'in the lead: ' + Math.round((xpScale() - 1) * 100) + '% XP<br>' : '') + (me.streak >= 3 ? '🔥 ' + me.streak + ' STREAK' : '');
   const ch = $('chan'); if (me.recallT > 0) { ch.style.display = 'block'; ch.firstElementChild.style.width = (1 - me.recallT / 4) * 100 + '%'; ch.lastElementChild.textContent = 'RECALLING ' + me.recallT.toFixed(1) + 's'; } else if (ch.style.display !== 'none') ch.style.display = 'none';
   renderShop();
